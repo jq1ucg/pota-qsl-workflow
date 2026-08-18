@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+"""
+指定ディレクトリを再帰的に検索して *.adi / *.adif ファイルを開き、
+各QSOレコードの STATION_CALLSIGN タグ(例: JQ1UCG/2)からJARLエリア番号を、
+MY_POTA_REF タグから公園REF番号(例: JP-1181)を抽出する。
+
+既存の POTA-REF.csv(-o で指定、既に存在すれば読み込む)と突合し、
+まだ登録されていない (JARLエリア番号, 公園REF番号) の組み合わせのみを
+新規行として追記する(差分更新)。
+
+新規に見つかった公園REF番号については、pota.app APIの
+  https://api.pota.app/program/parks/JP
+から日本全公園のGRIDLOCATOR(緯度経度)・POTA県コード(locationDesc)を
+一括取得し、市区町村名・JCC/JCG/AJA番号への変換は
+match_pota_jarl_area.py (同ディレクトリに配置) の既存ロジックを
+そのままモジュールとして再利用する。
+
+前提:
+  - STATION_CALLSIGN には必ず "/n" 形式のエリア番号サフィックスが
+    付与されているものとして扱う(付いていないレコードはスキップし警告)。
+  - 複数の都道府県にまたがる公園は、既存 POTA-REF.csv と同じ流儀で
+    県コードごとに複数行を出力する(各行のJARLエリア番号は共通して
+    STATION_CALLSIGNから得たエリア番号を使う。POTA県コードから求まる
+    エリア番号は使わない)。
+
+jarl_area_pota_mapping.csv(JARLエリア番号↔都道府県↔POTA県コードの対応表)は
+不変の静的データのため、外部ファイルを読み込まずスクリプト内に直接埋め込んでいる。
+
+使い方:
+    python3 build_pota_ref_csv.py <ADIF検索ルートディレクトリ> -o POTA-REF.csv [options]
+
+オプション:
+    -o, --output PATH     出力CSV(-a指定時、または既存ファイルがあり-n未指定時は読み込んで差分追記する。
+                           省略時は新規分のみ標準出力へ出力)
+    -n, --new              既存の-o出力ファイルが存在してもそれを無視し、新規作成(上書き)する
+    -a, --append            既存の-o出力ファイルに対して差分追記する(-o省略時かつ-n未指定時のデフォルト動作と同じ)
+    --parks-json PATH     pota.app API取得結果のオフラインJSONキャッシュ
+                           (指定時、ファイルが存在すればAPI問い合わせをせずこれを使う。
+                            存在しない場合はAPIから取得しこのパスへ保存する)
+    --muni-cache PATH     市町村名/JCC・JCG・AJA番号の問い合わせ結果をJSONでキャッシュするファイル
+                           (match_pota_jarl_area.py と共通形式なので使い回せる)
+    --no-muni              市町村名・JCC/JCG/AJA番号の問い合わせを行わない(該当2カラムは空欄)
+    -j, --jobs N            GSI逆ジオコーディングAPIへの並列問い合わせ数(デフォルト: 10)
+    --dry-run                ファイルへの書き込みを行わず、追加(または新規作成)される行と件数のみ表示する
+    -e, --exclude DIRNAME  この名前(完全一致)のディレクトリを検索対象から除外する。
+                           複数回指定して複数ディレクトリを除外できる
+                           (例: -e "POTA-Aichi,Gifu,Mie" -e POTA-Gifu)
+    -q, --quiet              進捗表示を抑制する
+    --version                バージョン番号を表示して終了
+
+変更履歴:
+    1.0.0 (2026-08-16) 初版
+    1.1.0 (2026-08-16) -n/--new(既存出力ファイルを無視して新規作成)、
+                        -a/--append(既存出力ファイルへの差分追記、デフォルト動作の明示指定)
+                        オプションを追加。-n/-aは同時指定不可。
+                        従来--dry-runの短縮形だった-nは-n/--newと衝突するため廃止
+                        (--dry-runは長い形式のみに変更)。
+    1.2.0 (2026-08-16) jarl_area_pota_mapping.csvの内容(不変の静的データ)を
+                        スクリプト内にPythonの定数として直接埋め込み、外部ファイル
+                        引数(mapping_csv_path)を廃止。
+    1.3.0 (2026-08-16) -e/--exclude DIRNAME オプションを追加(複数回指定可)。
+                        指定した名前(完全一致)のディレクトリを検索から除外する。
+                        ディレクトリ探索方式をglob再帰からos.walkに変更
+                        (除外ディレクトリ以下を丸ごと探索対象から外すため)。
+"""
+
+import argparse
+import csv
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import match_pota_jarl_area as mpja  # noqa: E402  (同ディレクトリの既存ロジックを再利用)
+
+__version__ = "1.3.0"
+
+DEFAULT_JOBS = mpja.DEFAULT_JOBS
+POTA_JP_PARKS_API_URL = "https://api.pota.app/program/parks/JP"
+
+CSV_HEADER = ["JARLエリア番号", "公園REF番号", "JP都道府県名", "都道府県名+市区/郡名", "JCC/JCG/AJA"]
+
+# jarl_area_pota_mapping.csv の内容(不変の静的データ)を直接埋め込む。
+# 各タプルは (jarl_area, prefecture, pota_locationDesc, note)。
+# prefectureが空の行(小笠原=JP-OG)はnoteを都道府県名の代わりに使う
+# (mpja.load_jarl_area_mapping()と同じ扱い)。
+JARL_AREA_POTA_MAPPING = [
+    ("1", "東京都", "JP-TK", ""),
+    ("1", "", "JP-OG", "小笠原(東京都だがTKとは別コード)"),
+    ("1", "神奈川県", "JP-KN", ""),
+    ("1", "千葉県", "JP-CH", ""),
+    ("1", "埼玉県", "JP-ST", ""),
+    ("1", "茨城県", "JP-IB", ""),
+    ("1", "栃木県", "JP-TC", ""),
+    ("1", "群馬県", "JP-GM", ""),
+    ("1", "山梨県", "JP-YN", ""),
+    ("2", "愛知県", "JP-AI", ""),
+    ("2", "静岡県", "JP-SZ", ""),
+    ("2", "岐阜県", "JP-GF", ""),
+    ("2", "三重県", "JP-ME", ""),
+    ("3", "大阪府", "JP-OS", ""),
+    ("3", "兵庫県", "JP-HG", ""),
+    ("3", "京都府", "JP-KY", ""),
+    ("3", "滋賀県", "JP-SH", ""),
+    ("3", "奈良県", "JP-NR", ""),
+    ("3", "和歌山県", "JP-WK", ""),
+    ("4", "広島県", "JP-HS", ""),
+    ("4", "岡山県", "JP-OY", ""),
+    ("4", "島根県", "JP-SM", ""),
+    ("4", "鳥取県", "JP-TT", ""),
+    ("4", "山口県", "JP-YC", ""),
+    ("5", "徳島県", "JP-TS", ""),
+    ("5", "香川県", "JP-KG", ""),
+    ("5", "愛媛県", "JP-EH", ""),
+    ("5", "高知県", "JP-KC", ""),
+    ("6", "福岡県", "JP-FO", ""),
+    ("6", "佐賀県", "JP-SG", ""),
+    ("6", "長崎県", "JP-NS", ""),
+    ("6", "熊本県", "JP-KM", ""),
+    ("6", "大分県", "JP-OT", ""),
+    ("6", "宮崎県", "JP-MZ", ""),
+    ("6", "鹿児島県", "JP-KS", ""),
+    ("6", "沖縄県", "JP-ON", ""),
+    ("7", "青森県", "JP-AO", ""),
+    ("7", "岩手県", "JP-IW", ""),
+    ("7", "宮城県", "JP-MG", ""),
+    ("7", "秋田県", "JP-AK", ""),
+    ("7", "山形県", "JP-YT", ""),
+    ("7", "福島県", "JP-FS", ""),
+    ("8", "北海道", "JP-HK", ""),
+    ("9", "富山県", "JP-TY", ""),
+    ("9", "石川県", "JP-IS", ""),
+    ("9", "福井県", "JP-FI", ""),
+    ("0", "新潟県", "JP-NI", ""),
+    ("0", "長野県", "JP-NN", ""),
+]
+
+
+def load_jarl_area_mapping_static():
+    """埋め込み済みのJARL_AREA_POTA_MAPPINGから
+    POTA県コード(例: 'JP-AI') -> (JARLエリア番号, 都道府県名) の辞書を作る。
+    mpja.load_jarl_area_mapping()が外部CSVから作るものと同じ形式・同じ内容。"""
+    code_to_area_pref = {}
+    for jarl_area, prefecture, pota_locationDesc, note in JARL_AREA_POTA_MAPPING:
+        pref = prefecture or note
+        code_to_area_pref[pota_locationDesc] = (jarl_area, pref)
+    return code_to_area_pref
+
+STATION_CALLSIGN_RE = re.compile(r"<station_callsign:\d+>([^\s<]+)", re.IGNORECASE)
+MY_POTA_REF_RE = re.compile(r"<my_pota_ref:\d+>([^\s<]+)", re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# 1. ADIFファイルの再帰検索とタグ抽出
+# ---------------------------------------------------------------------------
+
+def find_adif_files(root_dir, exclude_dirnames=None):
+    """root_dir配下を再帰的に検索し、*.adi / *.adif ファイルのパス一覧を返す(大小文字区別なし)。
+    exclude_dirnamesに含まれる名前のディレクトリ(名前の完全一致)は、
+    そのディレクトリ以下ごと検索対象から除外する。"""
+    exclude_set = set(exclude_dirnames or [])
+    adif_ext = {".adi", ".adif"}
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        # os.walk中にdirnamesをin-placeで書き換えると、それ以下の探索が丸ごとスキップされる
+        dirnames[:] = [d for d in dirnames if d not in exclude_set]
+        for name in filenames:
+            if os.path.splitext(name)[1].lower() in adif_ext:
+                found.append(os.path.join(dirpath, name))
+    return sorted(found)
+
+
+def area_from_station_callsign(callsign):
+    """STATION_CALLSIGN(例: JQ1UCG/2, JQ1UCG/2/P)からJARLエリア番号(1文字)を抽出する。
+    見つからない場合はNoneを返す。"""
+    parts = callsign.strip().upper().split("/")
+    for part in parts[1:]:
+        if len(part) == 1 and part.isdigit():
+            return part
+    return None
+
+
+def extract_pairs_from_adif(adif_path, warnings):
+    """1つのADIFファイルから (エリア番号, 公園REF番号) のペアの集合を抽出する。
+    STATION_CALLSIGNからエリア番号を判定できないレコード、MY_POTA_REFが無いレコードは
+    スキップし、warningsリストに理由を追記する。"""
+    pairs = set()
+    try:
+        with open(adif_path, encoding="utf-8", errors="replace") as f:
+            data = f.read()
+    except OSError as e:
+        warnings.append(f"{adif_path}: 読み込み失敗 ({e})")
+        return pairs
+
+    # ヘッダー(<EOH>より前)を除外してレコード分割
+    body = re.split(r"<eoh>", data, maxsplit=1, flags=re.IGNORECASE)[-1]
+    for i, record in enumerate(re.split(r"<eor>", body, flags=re.IGNORECASE)):
+        if not record.strip():
+            continue
+        call_m = STATION_CALLSIGN_RE.search(record)
+        ref_m = MY_POTA_REF_RE.search(record)
+        if not ref_m:
+            continue  # POTA以外のQSOレコードは対象外(黙ってスキップ)
+        if not call_m:
+            warnings.append(f"{adif_path} レコード{i}: STATION_CALLSIGNタグが無いためスキップ")
+            continue
+        area = area_from_station_callsign(call_m.group(1))
+        if area is None:
+            warnings.append(
+                f"{adif_path} レコード{i}: STATION_CALLSIGN='{call_m.group(1)}' から"
+                f"エリア番号を判定できないためスキップ")
+            continue
+        pairs.add((area, ref_m.group(1).strip().upper()))
+    return pairs
+
+
+def scan_directory(root_dir, exclude_dirnames=None, quiet=False):
+    """root_dir配下の全ADIFファイルから (エリア番号, 公園REF番号) の集合を作る。
+    exclude_dirnamesに含まれる名前のディレクトリは検索対象から除外する。"""
+    files = find_adif_files(root_dir, exclude_dirnames=exclude_dirnames)
+    if not quiet:
+        if exclude_dirnames:
+            print(f"[info] 除外ディレクトリ名: {sorted(exclude_dirnames)}", file=sys.stderr)
+        print(f"[info] ADIFファイル {len(files)}件を検出", file=sys.stderr)
+    all_pairs = set()
+    warnings = []
+    for path in files:
+        pairs = extract_pairs_from_adif(path, warnings)
+        all_pairs |= pairs
+    if not quiet:
+        for w in warnings:
+            print(f"[warn] {w}", file=sys.stderr)
+        print(f"[info] (エリア,公園REF) のユニークな組み合わせ {len(all_pairs)}件を抽出", file=sys.stderr)
+    return all_pairs
+
+
+# ---------------------------------------------------------------------------
+# 2. 既存出力CSVの読み込み(差分判定用)
+# ---------------------------------------------------------------------------
+
+def load_existing_csv(path):
+    """既存のPOTA-REF.csvを読み込み、(既存(エリア,REF)の集合, 既存の全行リスト) を返す。
+    ファイルが無ければ (空集合, 空リスト) を返す。"""
+    if path is None or not os.path.exists(path):
+        return set(), []
+    existing_pairs = set()
+    rows = []
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        for row in reader:
+            if len(row) < 2:
+                continue
+            rows.append(row)
+            existing_pairs.add((row[0], row[1]))
+    return existing_pairs, rows
+
+
+# ---------------------------------------------------------------------------
+# 3. pota.app APIから日本全公園情報を取得(新規公園REFのみ使用)
+# ---------------------------------------------------------------------------
+
+def fetch_jp_parks_from_api(quiet=False):
+    """https://api.pota.app/program/parks/JP から日本全公園情報を取得し、
+    match_pota_jarl_area.load_park_info() と同じ形式の辞書
+    {reference: {"locdesc":..., "lat":..., "lon":...}} を返す。"""
+    if not quiet:
+        print(f"[info] pota.app APIから日本全公園情報を取得中: {POTA_JP_PARKS_API_URL}", file=sys.stderr)
+    try:
+        with urllib.request.urlopen(POTA_JP_PARKS_API_URL, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError) as e:
+        print(f"[error] pota.app API取得失敗: {e}", file=sys.stderr)
+        return None
+
+    park_info = {}
+    for row in data:
+        ref = row.get("reference")
+        if not ref:
+            continue
+        # APIのフィールド名はドキュメント未整備のため複数の候補名を試す。
+        # 実機で実行し実際のJSON構造と差異があれば、この対応表のみ調整すればよい。
+        lat = row.get("latitude") or row.get("lat")
+        lon = row.get("longitude") or row.get("lon") or row.get("lng")
+        locdesc = row.get("locationDesc") or row.get("locationDescription") or ""
+        park_info[ref] = {"locdesc": locdesc, "lat": lat, "lon": lon}
+    if not quiet:
+        print(f"[info] 公園情報 {len(park_info)}件を取得", file=sys.stderr)
+    return park_info
+
+
+def load_park_info_cached(cache_path, quiet=False):
+    """--parks-json 指定時: キャッシュファイルがあればそれを使い、無ければAPI取得して保存する"""
+    if cache_path and os.path.exists(cache_path):
+        if not quiet:
+            print(f"[info] 公園情報キャッシュを使用: {cache_path}", file=sys.stderr)
+        with open(cache_path, encoding="utf-8") as f:
+            return json.load(f)
+    park_info = fetch_jp_parks_from_api(quiet=quiet)
+    if park_info is None:
+        return None
+    if cache_path:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(park_info, f, ensure_ascii=False, indent=2, sort_keys=True)
+        if not quiet:
+            print(f"[info] 公園情報キャッシュを保存: {cache_path}", file=sys.stderr)
+    return park_info
+
+
+# ---------------------------------------------------------------------------
+# 4. 新規行の組み立て
+# ---------------------------------------------------------------------------
+
+def build_new_rows(new_pairs, park_info, code_to_area_pref, muni_lookup, quiet=False):
+    """新規に追加する (area, ref) ペアから出力行を組み立てる。
+    match_pota_jarl_area.build_table() と同様に、公園が複数県にまたがる場合は
+    県コードごとに複数行を出力するが、JARLエリア番号はSTATION_CALLSIGN由来のものを使う。"""
+    rows = []
+    missing_park_info = []
+    for area, ref in sorted(new_pairs):
+        info = park_info.get(ref)
+        if info is None:
+            missing_park_info.append(ref)
+            rows.append([area, ref, "(pota.app APIに該当なし)", "", ""])
+            continue
+
+        codes = [c.strip() for c in (info.get("locdesc") or "").split(",") if c.strip()]
+        if not codes:
+            codes = ["?"]
+        entry = muni_lookup.get(ref) or {}
+        muni = entry.get("muni") or ""
+        jarl = entry.get("jarl") or ""
+        for code in codes:
+            _, pref = code_to_area_pref.get(code, ("?", code))
+            pref_str = f"{code}({pref})"
+            rows.append([area, ref, pref_str, muni, jarl])
+
+    if missing_park_info and not quiet:
+        print(f"[warn] pota.app APIに情報が無い公園REF: {sorted(set(missing_park_info))}", file=sys.stderr)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def build_arg_parser():
+    parser = argparse.ArgumentParser(
+        description="ADIFを再帰検索してSTATION_CALLSIGN/MY_POTA_REFからPOTA-REF.csvを差分更新する")
+    parser.add_argument("adif_root", nargs="?", help="ADIFファイルを再帰検索するルートディレクトリ")
+    parser.add_argument("-o", "--output", metavar="PATH",
+                         help="出力CSV(既存ファイルがあれば読み込んで差分追記。省略時は新規分のみ標準出力へ)")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("-n", "--new", action="store_true",
+                             help="既存の-o出力ファイルを無視して新規作成(上書き)する")
+    mode_group.add_argument("-a", "--append", action="store_true",
+                             help="既存の-o出力ファイルへ差分追記する(デフォルト動作の明示指定)")
+    parser.add_argument("--parks-json", metavar="PATH",
+                         help="pota.app API取得結果のオフラインJSONキャッシュ(存在すれば再利用、無ければ取得して保存)")
+    parser.add_argument("--muni-cache", metavar="PATH",
+                         help="市町村名/JCC・JCG・AJA番号の問い合わせ結果JSONキャッシュ")
+    parser.add_argument("--no-muni", action="store_true",
+                         help="市町村名・JCC/JCG/AJA番号の問い合わせを行わない")
+    parser.add_argument("-j", "--jobs", type=int, default=DEFAULT_JOBS,
+                         help=f"GSI逆ジオコーディングAPIへの並列問い合わせ数(デフォルト: {DEFAULT_JOBS})")
+    parser.add_argument("--dry-run", action="store_true",
+                         help="ファイルへの書き込みを行わず、追加(または新規作成)される内容のみ表示する")
+    parser.add_argument("-e", "--exclude", metavar="DIRNAME", action="append", default=[],
+                         help="この名前(完全一致)のディレクトリを検索対象から除外する。"
+                              "複数回指定可能(例: -e POTA-Gifu -e \"POTA-Aichi,Gifu,Mie\")")
+    parser.add_argument("-q", "--quiet", action="store_true", help="進捗表示を抑制する")
+    parser.add_argument("--version", action="store_true", help="バージョン番号を表示して終了")
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    if args.version:
+        print(__version__)
+        sys.exit(0)
+
+    if not args.adif_root:
+        parser.print_usage(sys.stderr)
+        sys.exit(1)
+
+    quiet = args.quiet
+    code_to_area_pref = load_jarl_area_mapping_static()
+
+    # 1. ADIF再帰検索
+    found_pairs = scan_directory(args.adif_root, exclude_dirnames=args.exclude, quiet=quiet)
+
+    # 2. 既存CSVとの差分判定(-n/--new指定時は既存ファイルの内容を無視する)
+    if args.new:
+        existing_pairs, existing_rows = set(), []
+        if not quiet and args.output and os.path.exists(args.output):
+            print(f"[info] -n指定のため既存の{args.output}の内容は無視して新規作成します", file=sys.stderr)
+    else:
+        existing_pairs, existing_rows = load_existing_csv(args.output)
+    new_pairs = {(a, r) for (a, r) in found_pairs if (a, r) not in existing_pairs}
+    if not quiet:
+        print(f"[info] 既存{len(existing_pairs)}件 / 新規{len(new_pairs)}件", file=sys.stderr)
+
+    if not new_pairs:
+        if not quiet:
+            print("[info] 新規に追加すべき (エリア,公園REF) はありません", file=sys.stderr)
+        if not args.dry_run and args.output:
+            pass  # 変更なしなので書き込み不要
+        sys.exit(0)
+
+    # 3. 新規公園REFの情報取得(pota.app API、必要な場合のみ)
+    park_info = load_park_info_cached(args.parks_json, quiet=quiet)
+    if park_info is None:
+        print("[error] 公園情報を取得できなかったため終了します", file=sys.stderr)
+        sys.exit(1)
+
+    # 4. 市町村名・JCC/JCG/AJA変換(新規公園REFのみ)
+    new_refs = sorted({ref for (_, ref) in new_pairs})
+    cache = mpja.load_muni_cache(args.muni_cache)
+    if args.no_muni:
+        muni_lookup = {}
+    else:
+        muni_master = mpja.load_muni_master(verbose=not quiet)
+        geolonia_pref_cities = mpja.load_geolonia_pref_cities(verbose=not quiet)
+        jarl_master = mpja.load_jarl_award_master(verbose=not quiet)
+        award_map, jarl_award_map = mpja.build_muni_award_unit_map(
+            muni_master, geolonia_pref_cities, jarl_master, verbose=not quiet)
+        mpja.resolve_all_municipalities(
+            new_refs, park_info, cache, award_map, jarl_award_map,
+            jobs=args.jobs, quiet=quiet)
+        muni_lookup = cache
+        if args.muni_cache:
+            mpja.save_muni_cache(args.muni_cache, cache)
+
+    # 5. 新規行の組み立て
+    new_rows = build_new_rows(new_pairs, park_info, code_to_area_pref, muni_lookup, quiet=quiet)
+
+    if not quiet:
+        print(f"[info] 追加行数: {len(new_rows)}", file=sys.stderr)
+
+    if args.dry_run:
+        writer = csv.writer(sys.stdout, lineterminator="\n")
+        writer.writerow(CSV_HEADER)
+        for row in new_rows:
+            writer.writerow(row)
+        sys.exit(0)
+
+    if args.output:
+        all_rows = existing_rows + new_rows
+        all_rows.sort(key=lambda r: (r[0], r[1], r[2]))
+        with open(args.output, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, lineterminator="\n")
+            writer.writerow(CSV_HEADER)
+            writer.writerows(all_rows)
+        if not quiet:
+            print(f"[info] {args.output} を更新しました(合計{len(all_rows)}行)", file=sys.stderr)
+    else:
+        writer = csv.writer(sys.stdout, lineterminator="\n")
+        writer.writerow(CSV_HEADER)
+        for row in new_rows:
+            writer.writerow(row)
+
+
+if __name__ == "__main__":
+    main()
