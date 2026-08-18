@@ -13,6 +13,14 @@ Early-stage personal tooling — the repository holds a set of independent
 scripts, no tests, no packaging (no `requirements.txt`/`pyproject.toml` yet).
 Update this file as structure, dependencies, and conventions solidify.
 
+## Conventions
+- Each script keeps its own `VERSION` constant, starting at `1.0.0`, with a
+  `変更履歴:` (changelog) section in its module docstring listing what
+  changed at each version, plus an `オプション:` section documenting each
+  CLI flag. Bump the version and add a changelog entry whenever a script's
+  behavior or options change — see `rumlogng-merge-adif.py` or
+  `split_adif_by_station_callsign.py` for the pattern to follow.
+
 ## Scripts (pipeline order)
 
 1. **`rumlogng-merge-adif.py`** — Normalizes RUMLogNG ADIF exports (which
@@ -30,24 +38,29 @@ Update this file as structure, dependencies, and conventions solidify.
 4. **`polo-lotw-fill.py`** — Cross-references `MY_POTA_REF` against
    `POTA-REF.csv` to fill in `MY_STATE`, `MY_CNTY`, and a JCC/JCG/AJA tag,
    producing ADIF ready for LoTW/TQSL upload.
-5. **`build_qsl_cards.py`** / **`polo_build_qsl_cards.py`** — Split a merged
+5. **`split_adif_by_station_callsign.py`** — Splits a `polo-lotw-fill.py`
+   output ADIF into one file per `STATION_CALLSIGN` value (e.g. `JL1ICY/1`,
+   `JL1ICY/2`), named `YYYYMMDD-STATION_CALLSIGN_lotw.adif` (run date, `/`
+   replaced with `-`), so each portable-suffix station can be uploaded to
+   LoTW/TQSL separately.
+6. **`build_qsl_cards.py`** / **`polo_build_qsl_cards.py`** — Split a merged
    ADIF into one ADIF + CSV per contacted station (dedupes portable
    suffixes like `JQ1UCG/1` and DX-prefixed calls like `HL1/JK1MGC`),
    producing `output/qsl_cards.csv` (one row per station) and
    `output/detail/<CALL>.csv` (one row per QSO) for glabels mail merge.
    The `polo_` variant consumes `polo-lotw-fill.py` output specifically.
-6. **`check_jarl_membership.py`** — Looks up callsigns on the JARL member
+7. **`check_jarl_membership.py`** — Looks up callsigns on the JARL member
    search site via Selenium (parallel headless Chrome) to find non-members
    (QSL not forwardable); also absorbs `fetch_jarl_noqsl.py`'s job via `-f`.
-7. **`fetch_jarl_noqsl.py`** — Fetches JARL's official "no QSL wanted"
+8. **`fetch_jarl_noqsl.py`** — Fetches JARL's official "no QSL wanted"
    station list and formats it for `pivot_qso_for_glabels.py --exclude-file`.
-8. **`pivot_qso_for_glabels.py`** — Pivots one-row-per-QSO CSVs into wide
+9. **`pivot_qso_for_glabels.py`** — Pivots one-row-per-QSO CSVs into wide
    rows (N QSOs per label, default 5) for glabels mail-merge printing;
    supports merging multiple input files/directories and excluding
    callsigns via a list file.
-9. **`sort_pivot_list.py`** — Sorts the summary listing printed by
-   `pivot_qso_for_glabels.py -c` by label count / QSO count.
-10. **`find_non_ja_calls.py`** — Utility to find generated filenames whose
+10. **`sort_pivot_list.py`** — Sorts the summary listing printed by
+    `pivot_qso_for_glabels.py -c` by label count / QSO count.
+11. **`find_non_ja_calls.py`** — Utility to find generated filenames whose
     callsign doesn't match a JA amateur radio prefix pattern.
 
 ## Repository
