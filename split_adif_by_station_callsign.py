@@ -18,6 +18,16 @@ STATION_CALLSIGNタグが無い(または空の)レコードは警告を表示�
     python3 split_adif_by_station_callsign.py input.adif
     python3 split_adif_by_station_callsign.py input.adif -o output_dir
     python3 split_adif_by_station_callsign.py a.adif b.adif -o output_dir --dedupe
+
+オプション:
+    input                 入力ADIFファイル(複数指定可)
+    -o, --output-dir DIR  出力先ディレクトリ(省略時: output/。無ければ作成する)
+    --dedupe              CALL+QSO_DATE+TIME_ON+BAND+MODE が同一のレコードを重複除去
+    --version             バージョン番号を表示して終了
+
+変更履歴:
+    1.0.0  初版。STATION_CALLSIGNタグの値ごとにADIFを分割し、
+           YYYYMMDD-STATION_CALLSIGN_lotw.adif として出力。
 """
 
 import argparse
