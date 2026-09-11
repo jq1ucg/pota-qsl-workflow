@@ -14,8 +14,10 @@ QSLカード印刷用スクリプト
 4. glabelsでの差し込み印刷用にCSVも作成できる
    - output/qsl_cards.csv       : 局ごとに1行の全局サマリCSV
    - output/detail/<CALL>.csv   : 局ごとに1交信1行の明細CSV
-   いずれもQSO_COMMENT列には、ADIFのmy_pota_refフィールドの値から
-   "MY POTA ACT REF# JP-XXXX" (全て大文字) を入れる(my_pota_refが無いQSOは空欄)
+   いずれもQSO_COMMENT列には、ADIFのstation_callsignフィールドと
+   my_pota_refフィールドの値から "JQ1UCG/1 MY POTA ACT REF# JP-XXXX"
+   (自局コールサイン+POTA公園情報、全て大文字) を入れる
+   (my_pota_refが無いQSOは空欄、station_callsignが無い場合はPOTA公園情報のみ)
 5. 画面表示した内容は、以下のファイルにも同時出力する
    - output/ADIF-Summary-YYYYMMDD-HHMM.txt  (--adif実行時)
    - output/CSV-Summary-YYYYMMDD-HHMM.txt   (--csv実行時)
@@ -28,6 +30,11 @@ QSLカード印刷用スクリプト
   python3 build_qsl_cards.py 入力.adif --csv       # CSV(サマリ+明細)のみ作成
 
 CHANGELOG:
+    1.02 (2026-09-11) pota_comment()がQSO_COMMENTにstation_callsign
+         (自局コールサイン、例: JQ1UCG/1)も含めるよう改修。従来は
+         my_pota_refのPOTA公園情報のみだったが、印刷したQSLカードから
+         どの自局コールサインで運用したQSOかも判別できるようにした
+         (station_callsignが無い場合は従来通りPOTA公園情報のみ)。
     1.01 (2026-08-16) ADIFフィールド値の切り出しを文字数ベースから
          バイト数(UTF-8)ベースに修正。日本語などマルチバイト文字を
          含むフィールド(例: COMMENT)があると、文字数ベースのスライスでは
@@ -39,7 +46,7 @@ CHANGELOG:
          (pivot_qso_for_glabels.py の normalize_call() と同じロジック)。
 """
 
-__version__ = "1.01"
+__version__ = "1.02"
 
 import argparse
 import csv
@@ -54,9 +61,18 @@ EOR_RE = re.compile(r"<eor>", re.IGNORECASE)
 
 
 def pota_comment(fields):
-    """my_pota_refフィールドの値から "MY POTA ACT REF# JP-XXXX" (全て大文字) を返す。無ければ空文字"""
+    """my_pota_refとstation_callsignフィールドの値から
+    "JQ1UCG/1 MY POTA ACT REF# JP-XXXX" (全て大文字) を返す。
+    my_pota_refが無ければ空文字。station_callsignが無ければ従来通り
+    "MY POTA ACT REF# JP-XXXX" のみを返す。
+    """
     ref = fields.get("my_pota_ref", "").strip()
-    return f"My POTA Act Ref# {ref}".upper() if ref else ""
+    if not ref:
+        return ""
+    station = fields.get("station_callsign", "").strip()
+    if station:
+        return f"{station} My POTA Act Ref# {ref}".upper()
+    return f"My POTA Act Ref# {ref}".upper()
 
 
 def pota_ref_without_comment_mark(fields):
