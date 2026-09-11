@@ -29,6 +29,9 @@ POTAアプリ(POTA公式ロギングアプリ)からエクスポートしたADIF
      テキストの行や、<CREATED_TIMESTAMP:n>タグが含まれる。これらは
      QSOフィールドではなく、除去しないとレコード本文に混入してしまう
      ため、該当する行(<CREATED_TIMESTAMP:n>タグは値ごと)を除去する。
+  4. 同じくCQRLOGエクスポートでは、各QSOレコードに<APP_CQRLOG_PROFILE:n>
+     タグ(CQRLOGのオペレータプロファイル情報)が付与されている場合が
+     ある。build_qsl_cards.py側では不要な情報のため、値ごと除去する。
 
 各レコードのフィールド値そのもの(MY_POTA_REF追加以外)は変更しない
 (パススルー)。
@@ -50,6 +53,7 @@ POTAアプリ(POTA公式ロギングアプリ)からエクスポートしたADIF
     --version               バージョン番号を表示して終了
 
 変更履歴:
+    1.2.0  <APP_CQRLOG_PROFILE>タグ(値ごと)の除去に対応。
     1.1.0  CQRLOGエクスポートのフリーテキスト行("ADIF export from
            CQRLOG ..."、Copyright表記、"Internet: http://www.cqrlog.com")
            と<CREATED_TIMESTAMP>タグの除去に対応。
@@ -62,11 +66,14 @@ import re
 import sys
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 EOR_RE = re.compile(r"<eor>", re.IGNORECASE)
 FIELD_RE = re.compile(r"<(\w+):(\d+)(?::[^>]*)?>", re.IGNORECASE)
-HEADER_TAGS = ("ADIF_VER", "PROGRAMID", "PROGRAMVERSION", "CREATED_TIMESTAMP")
+# ヘッダタグに限らず、ファイル/レコード中のどこに出現しても除去したい
+# (QSOフィールドとして無意味な)タグ。位置を問わず全出現箇所を除去する。
+STRIP_TAGS = ("ADIF_VER", "PROGRAMID", "PROGRAMVERSION", "CREATED_TIMESTAMP",
+              "APP_CQRLOG_PROFILE")
 NOISE_LINE_SUBSTRINGS = (
     "ADIF export from CQRLOG",
     "Copyright (C) 2024 by Petr, OK2CQR and Martin, OK1RR",
@@ -97,12 +104,12 @@ def strip_noise_lines(text: str) -> str:
 
 
 def strip_embedded_headers(text: str) -> str:
-    """ファイル全体からADIF_VER/PROGRAMID/PROGRAMVERSION/CREATED_TIMESTAMP/
-    EOHタグと、CQRLOGのフリーテキストヘッダ行を除去し、QSOレコードの
-    フィールドのみを残す(ヘッダブロックが複数埋め込まれていても、
-    出現位置に関わらずすべて除去する)。"""
+    """ファイル全体からSTRIP_TAGSの各タグ(値ごと)とEOHタグ、CQRLOGの
+    フリーテキストヘッダ行を除去し、QSOレコードとして必要なフィールドの
+    みを残す(ヘッダブロックが複数埋め込まれていても、レコード本文中に
+    混在していても、出現位置に関わらずすべて除去する)。"""
     out = strip_noise_lines(text)
-    for tag in HEADER_TAGS:
+    for tag in STRIP_TAGS:
         out = remove_field(out, tag)
     out = re.sub(r"<eoh>", "", out, flags=re.IGNORECASE)
     return out
