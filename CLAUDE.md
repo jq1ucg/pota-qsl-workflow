@@ -43,24 +43,33 @@ Update this file as structure, dependencies, and conventions solidify.
    `JL1ICY/2`), named `YYYYMMDD-STATION_CALLSIGN_lotw.adif` (run date, `/`
    replaced with `-`), so each portable-suffix station can be uploaded to
    LoTW/TQSL separately.
-6. **`build_qsl_cards.py`** / **`polo_build_qsl_cards.py`** — Split a merged
+6. **`create-input-build_qsl_cards.py`** — Preprocesses an ADIF exported
+   directly from the official **POTA app** (e.g. `alladif.adif`) so
+   `build_qsl_cards.py` can read it: strips the repeated per-activation
+   `ADIF_VER`/`PROGRAMID`/`PROGRAMVERSION`/`EOH` header blocks the app
+   embeds mid-file, and adds a `MY_POTA_REF` tag (from `MY_SIG`=`POTA` +
+   `MY_SIG_INFO`, which is how the POTA app records the operator's own
+   park — as opposed to `SIG`/`SIG_INFO`, which on a park-to-park QSO
+   holds the *other* station's park) so the QSL comment/POTA-ref fields
+   `build_qsl_cards.py` and `build_pota_ref_csv.py` expect are populated.
+7. **`build_qsl_cards.py`** / **`polo_build_qsl_cards.py`** — Split a merged
    ADIF into one ADIF + CSV per contacted station (dedupes portable
    suffixes like `JQ1UCG/1` and DX-prefixed calls like `HL1/JK1MGC`),
    producing `output/qsl_cards.csv` (one row per station) and
    `output/detail/<CALL>.csv` (one row per QSO) for glabels mail merge.
    The `polo_` variant consumes `polo-lotw-fill.py` output specifically.
-7. **`check_jarl_membership.py`** — Looks up callsigns on the JARL member
+8. **`check_jarl_membership.py`** — Looks up callsigns on the JARL member
    search site via Selenium (parallel headless Chrome) to find non-members
    (QSL not forwardable); also absorbs `fetch_jarl_noqsl.py`'s job via `-f`.
-8. **`fetch_jarl_noqsl.py`** — Fetches JARL's official "no QSL wanted"
+9. **`fetch_jarl_noqsl.py`** — Fetches JARL's official "no QSL wanted"
    station list and formats it for `pivot_qso_for_glabels.py --exclude-file`.
-9. **`pivot_qso_for_glabels.py`** — Pivots one-row-per-QSO CSVs into wide
-   rows (N QSOs per label, default 5) for glabels mail-merge printing;
-   supports merging multiple input files/directories and excluding
-   callsigns via a list file.
-10. **`sort_pivot_list.py`** — Sorts the summary listing printed by
+10. **`pivot_qso_for_glabels.py`** — Pivots one-row-per-QSO CSVs into wide
+    rows (N QSOs per label, default 5) for glabels mail-merge printing;
+    supports merging multiple input files/directories and excluding
+    callsigns via a list file.
+11. **`sort_pivot_list.py`** — Sorts the summary listing printed by
     `pivot_qso_for_glabels.py -c` by label count / QSO count.
-11. **`find_non_ja_calls.py`** — Utility to find generated filenames whose
+12. **`find_non_ja_calls.py`** — Utility to find generated filenames whose
     callsign doesn't match a JA amateur radio prefix pattern.
 
 ## Repository
