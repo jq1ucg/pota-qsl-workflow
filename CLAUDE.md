@@ -71,6 +71,12 @@ Update this file as structure, dependencies, and conventions solidify.
     `pivot_qso_for_glabels.py -c` by label count / QSO count.
 12. **`find_non_ja_calls.py`** — Utility to find generated filenames whose
     callsign doesn't match a JA amateur radio prefix pattern.
+13. **`extract_fd_6dn.py`** — Ad-hoc, one-off script (hardcoded dates/
+    callsign, no `VERSION`/argparse) that pulls QSOs falling in two
+    hardcoded date ranges (Field Day and a "6DN" event) out of an ADIF
+    and stamps each with event-specific `STATION_CALLSIGN`/`MY_STATE`/
+    `MY_CNTY`/`JCCJCGAJA` tags. Does not follow the versioning convention
+    below — treat as a throwaway/example rather than a pipeline stage.
 
 ## Repository
 - GitHub: https://github.com/jq1ucg/pota-qsl-workflow
