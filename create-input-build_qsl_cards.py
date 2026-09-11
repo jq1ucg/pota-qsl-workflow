@@ -23,6 +23,12 @@ POTAアプリ(POTA公式ロギングアプリ)からエクスポートしたADIF
      ("MY POTA ACT REF# JP-XXXX")を作るため、MY_SIG=POTAのレコードには
      MY_SIG_INFOの値をそのままMY_POTA_REFタグとして追加する
      (既にMY_POTA_REFタグがあるレコードは変更しない)。
+  3. CQRLOGからエクスポートしたADIFが混在している場合、ヘッダ部に
+     "ADIF export from CQRLOG ..."、"Copyright (C) 2024 by Petr, OK2CQR
+     and Martin, OK1RR"、"Internet: http://www.cqrlog.com" というフリー
+     テキストの行や、<CREATED_TIMESTAMP:n>タグが含まれる。これらは
+     QSOフィールドではなく、除去しないとレコード本文に混入してしまう
+     ため、該当する行(<CREATED_TIMESTAMP:n>タグは値ごと)を除去する。
 
 各レコードのフィールド値そのもの(MY_POTA_REF追加以外)は変更しない
 (パススルー)。
@@ -44,6 +50,9 @@ POTAアプリ(POTA公式ロギングアプリ)からエクスポートしたADIF
     --version               バージョン番号を表示して終了
 
 変更履歴:
+    1.1.0  CQRLOGエクスポートのフリーテキスト行("ADIF export from
+           CQRLOG ..."、Copyright表記、"Internet: http://www.cqrlog.com")
+           と<CREATED_TIMESTAMP>タグの除去に対応。
     1.0.0  初版。ADIF_VER/PROGRAMID/PROGRAMVERSION/EOHの埋め込みヘッダ
            除去と、MY_SIG=POTAレコードへのMY_POTA_REF付与に対応。
 """
@@ -53,11 +62,16 @@ import re
 import sys
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 EOR_RE = re.compile(r"<eor>", re.IGNORECASE)
 FIELD_RE = re.compile(r"<(\w+):(\d+)(?::[^>]*)?>", re.IGNORECASE)
-HEADER_TAGS = ("ADIF_VER", "PROGRAMID", "PROGRAMVERSION")
+HEADER_TAGS = ("ADIF_VER", "PROGRAMID", "PROGRAMVERSION", "CREATED_TIMESTAMP")
+NOISE_LINE_SUBSTRINGS = (
+    "ADIF export from CQRLOG",
+    "Copyright (C) 2024 by Petr, OK2CQR and Martin, OK1RR",
+    "Internet: http://www.cqrlog.com",
+)
 
 
 def remove_field(text: str, tag: str) -> str:
@@ -75,11 +89,19 @@ def remove_field(text: str, tag: str) -> str:
     return out
 
 
+def strip_noise_lines(text: str) -> str:
+    """CQRLOGエクスポートのヘッダに含まれるフリーテキスト行
+    (NOISE_LINE_SUBSTRINGSのいずれかを含む行)を除去する。"""
+    lines = text.splitlines(keepends=True)
+    return "".join(ln for ln in lines if not any(s in ln for s in NOISE_LINE_SUBSTRINGS))
+
+
 def strip_embedded_headers(text: str) -> str:
-    """ファイル全体からADIF_VER/PROGRAMID/PROGRAMVERSION/EOHタグを除去し、
-    QSOレコードのフィールドのみを残す(ヘッダブロックが複数埋め込まれて
-    いても、出現位置に関わらずすべて除去する)。"""
-    out = text
+    """ファイル全体からADIF_VER/PROGRAMID/PROGRAMVERSION/CREATED_TIMESTAMP/
+    EOHタグと、CQRLOGのフリーテキストヘッダ行を除去し、QSOレコードの
+    フィールドのみを残す(ヘッダブロックが複数埋め込まれていても、
+    出現位置に関わらずすべて除去する)。"""
+    out = strip_noise_lines(text)
     for tag in HEADER_TAGS:
         out = remove_field(out, tag)
     out = re.sub(r"<eoh>", "", out, flags=re.IGNORECASE)
