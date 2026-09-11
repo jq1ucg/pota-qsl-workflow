@@ -32,9 +32,13 @@ POTAアプリ(POTA公式ロギングアプリ)からエクスポートしたADIF
   4. 同じくCQRLOGエクスポートでは、各QSOレコードに<APP_CQRLOG_PROFILE:n>
      タグ(CQRLOGのオペレータプロファイル情報)が付与されている場合が
      ある。build_qsl_cards.py側では不要な情報のため、値ごと除去する。
+  5. 各レコードのタグの並び順を、QSO_DATE→TIME_ON→CALLで始まるように
+     並べ替える。元のレコードでQSO_DATEより前にあったタグ(QSO_DATE/
+     TIME_ON/CALL自身を除く)は、そのレコードの末尾(<eor>の直前)へ
+     移動する。それ以外のタグは元の相対順序を保ったままCALLの後に続く。
 
-各レコードのフィールド値そのもの(MY_POTA_REF追加以外)は変更しない
-(パススルー)。
+各レコードのフィールド値そのもの(MY_POTA_REF追加・タグ並べ替え以外)は
+変更しない(パススルー)。
 
 使い方:
     python3 create-input-build_qsl_cards.py alladif.adif -o input_for_build_qsl_cards.adif
@@ -53,6 +57,9 @@ POTAアプリ(POTA公式ロギングアプリ)からエクスポートしたADIF
     --version               バージョン番号を表示して終了
 
 変更履歴:
+    1.3.0  レコード内タグの並べ替えに対応。QSO_DATE→TIME_ON→CALLの順で
+           行を開始し、元々QSO_DATEより前にあったタグは行末(<eor>の
+           直前)へ移動する。
     1.2.0  <APP_CQRLOG_PROFILE>タグ(値ごと)の除去に対応。
     1.1.0  CQRLOGエクスポートのフリーテキスト行("ADIF export from
            CQRLOG ..."、Copyright表記、"Internet: http://www.cqrlog.com")
@@ -66,7 +73,7 @@ import re
 import sys
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 EOR_RE = re.compile(r"<eor>", re.IGNORECASE)
 FIELD_RE = re.compile(r"<(\w+):(\d+)(?::[^>]*)?>", re.IGNORECASE)
@@ -136,6 +143,56 @@ def record_fields(record: str) -> dict:
         value = record[start:].encode("utf-8")[:byte_len].decode("utf-8", errors="replace")
         fields[tag] = value
     return fields
+
+
+def split_record_fields(record: str):
+    """レコードを出現順のタグ単位に分割する。戻り値は
+    [(タグ名, "<tag:len>value"形式のフィールド全体のテキスト), ...]
+    のリスト(出現順、重複タグもすべて保持する)。"""
+    fields = []
+    for m in FIELD_RE.finditer(record):
+        tag = m.group(1).upper()
+        byte_len = int(m.group(2))
+        start = m.end()
+        value = record[start:].encode("utf-8")[:byte_len].decode("utf-8", errors="replace")
+        fields.append((tag, record[m.start():start] + value))
+    return fields
+
+
+LEAD_TAGS = ("QSO_DATE", "TIME_ON", "CALL")
+
+
+def reorder_record_fields(record: str) -> str:
+    """レコード内のタグをQSO_DATE→TIME_ON→CALLの順で先頭に並べ替える。
+    元々QSO_DATEより前にあったタグ(QSO_DATE/TIME_ON/CALL自身を除く)は
+    末尾(呼び出し側で付与する<eor>の直前)へ移動する。それ以外のタグは
+    元の相対順序を保つ。"""
+    fields = split_record_fields(record)
+    if not fields:
+        return record
+
+    qso_date_idx = next((i for i, (tag, _) in enumerate(fields) if tag == "QSO_DATE"), None)
+
+    lead = []
+    used = set()
+    for lead_tag in LEAD_TAGS:
+        for i, (tag, text) in enumerate(fields):
+            if i not in used and tag == lead_tag:
+                lead.append(text)
+                used.add(i)
+                break
+
+    middle = []
+    trailing = []
+    for i, (tag, text) in enumerate(fields):
+        if i in used:
+            continue
+        if qso_date_idx is not None and i < qso_date_idx:
+            trailing.append(text)
+        else:
+            middle.append(text)
+
+    return " ".join(lead + middle + trailing)
 
 
 def dedupe_key(record: str):
@@ -227,6 +284,8 @@ def main():
                 rec = rec + " " + build_field(pota_tag, fields[sig_info_tag].strip())
             elif not has_pota:
                 no_sig += 1
+
+            rec = reorder_record_fields(rec)
 
             if args.dedupe:
                 key = dedupe_key(rec)
