@@ -1,10 +1,10 @@
 # PSRTTY 1.15 Linux移植版（非公式）
 
-追加機能(1.1): **Hamlib rigctld へのTCP接続**（下記「rigctld接続」）。
+追加機能: **Hamlib rigctld へのTCP接続**（1.1: Yaesu/Kenwood、1.2: ICOMも対応。下記「rigctld接続」）。
 
 - 基礎: PSRTTY（H.Tanaka / JH1HST、AKIHABARA-GIKEN）配布アーカイブ `PSRTTY-1.16.tar.gz`（内部 `__version__` は 1.15）
 - 対象OS: Ubuntu 26.04 LTS（Ubuntu 24.04 LTS 上で動作確認）、x86_64 / aarch64
-- 名称: **PSRTTY 1.15 Linux port 1.1**（作者公式版・作者保証版ではありません）
+- 名称: **PSRTTY 1.15 Linux port 1.2**（作者公式版・作者保証版ではありません）
 - 元ソースの `docs/DISTRIBUTION_TERMS.txt` に従い、改変点は本書の「変更点」、元の著作権表示は保持しています。
   配布する場合は、作者への事前通知と、改良版ソース全体・ビルド用スクリプトの提供が必要です。
 
@@ -24,7 +24,7 @@ sudo usermod -aG dialout $USER         # CAT/外部PTTのシリアルに必須�
 
 ## rigctld接続（TCP）
 
-設定画面「無線機」タブで Yaesu/Kenwood（Hamlib機種）を選ぶと **接続方式** が現れます。
+設定画面「無線機」タブで機種（Yaesu/Kenwood/ICOMのいずれか）を選ぶと **接続方式** が現れます。
 
 | 項目 | 内容 |
 |---|---|
@@ -35,10 +35,28 @@ sudo usermod -aG dialout $USER         # CAT/外部PTTのシリアルに必須�
 - 機種は **rigctld側につないだ無線機** に合わせて選びます（フィルター幅・データモード等の機種別制御に使用）。COMポートとCAT速度は不要です。
 - 例: `rigctld -m 1035 -r /dev/ttyUSB0 -s 38400` を起動 → PSRTTYで `FT-991/A`・`rigctld（TCP）`・`127.0.0.1:4532`
 - 実装: Hamlib の NET rigctl バックエンド（`RIG_MODEL_NETRIGCTL`=2）を動的リンクした libhamlib 経由で使用します。接続前に3秒のTCP疎通確認を行い、失敗時は接続先付きのエラーを表示します。周波数・PTT・モード・NB/NR・フィルター・ALC/SWR/PWRは従来のHamlib機種と同じ経路です。
+### ICOMをrigctld経由で使う場合（1.2）
+
+ICOMの標準経路（`civ.py`）はシリアルへCI-Vフレームを直接書き込むためTCPに載せられません。rigctld接続時は `IcomHamlibController` が Hamlib API 経由で同じ操作を行います（シリアル接続時は従来のCI-Vのまま）。
+
+| 機能 | rigctld経由の扱い |
+|---|---|
+| 周波数・PTT・モード（LSB/USB/LSB-D/USB-D）・DATA ON | 対応（Hamlibの PKTLSB/PKTUSB） |
+| NB / NR / AN(=ANF) / MN | 対応（Hamlibの対応状況次第。読めなければ「—」） |
+| アンテナチューナー | `TUNER` 機能と `RIG_OP_TUNE` で対応（機種・Hamlib依存、**dummy rigでは未検証**） |
+| ALC | Hamlibの値(0～1)を×255してCI-Vの0～255相当で表示 |
+| SWR / PWR | Hamlibの校正値。機種別の独自校正表は使わない |
+| **FIL1～3の切替** | **不可**（常に「不明」扱い） |
+| CI-Vアドレス・CI-V速度・COMポート | 不要（画面から隠れる） |
+| PTT方式 | `CI-V`（=rigctld経由）と`外部接続`のみ。RTS/DTRは不可（ローカルのシリアルが無いため） |
+| 外部PTT専用機（IC-706など） | `外部接続`のみ（従来どおり） |
+| 周波数範囲 | 100 kHz～15 GHz（IC-905等に対応） |
+
+- ICOMのLAN接続（IC-705/7300/9700などの独自UDPプロトコル）はrigctldを介する場合のみ利用できます（Hamlib/wfview側の機能に依存）。
 - 設定保存: `radio.link` (`serial`/`rigctld`)、`radio.rigctld_host`、`radio.rigctld_port`。プロファイルごとに保存され、ALC較正の識別にも含まれます（シリアル利用者の既存較正は影響なし）。
 - 8言語（ja/en/ru/zh/ko/id/th/es）の文言を追加（`rigctld.*`）。ロシア語以下6言語の訳は機械的な短文で、ネイティブ確認はしていません。
 - 注意: rigctld は認証も暗号化も持ちません。信頼できるネットワーク内でのみ使用してください。
-- 検証: Hamlib 5.0.0~git の `rigctld -m 1`（ダミー無線機）に実接続し、接続・周波数設定/取得・PTT ON/OFF・モード設定、接続拒否時のエラー表示を確認。実機は未検証。
+- 検証: Hamlib 5.0.0~git の `rigctld -m 1`（ダミー無線機）に実接続し、Yaesu/ICOMの両方で、接続・周波数設定/取得（144 MHz、10 GHz帯含む）・PTT ON/OFF・モード4種の設定と読み戻し・データモード・接続拒否時のエラー表示を確認。**実機は未検証**。
 
 ## 変更点（Windows依存の除去）
 
@@ -86,7 +104,7 @@ Hamlib 5.0.0~git（上流master）をビルドし `LD_LIBRARY_PATH` で動的ロ
 
 元ソースの `python -m unittest discover`（643件, `QT_QPA_PLATFORM=offscreen`）: 642件成功。
 失敗1件 `test_connect_failure_ui_keeps_ticking` はタイマー回数に依存する時間依存テスト（移植前の元ソースでも同じ結果）。
-移植後（rigctld対応込み、テスト16件追加）: 659件中657件成功。失敗は時間依存の上記1件と、offscreen環境でマウスカーソル形状を見るテスト1件（`test_v60`、単独では3/3成功）。
+移植後（rigctld・ICOM対応込み）: 669件中、時間/環境依存の2件（`test_connect_failure_ui_keeps_ticking`、`test_v60` のマウスカーソル形状）を除き成功。後者は単独実行で成功。実rigctldを使うテストは `rigctld` がPATHに無い場合スキップ。
 
 ## このディレクトリについて
 
