@@ -1,0 +1,611 @@
+diff -ruN -x var a/LINUX_PORT.md b/LINUX_PORT.md
+--- a/LINUX_PORT.md	1970-01-01 00:00:00.000000000 +0000
++++ b/LINUX_PORT.md	2026-10-14 08:38:26.684811250 +0000
+@@ -0,0 +1,67 @@
++# PSRTTY 1.15 Linux移植版（非公式）
++
++- 基礎: PSRTTY（H.Tanaka / JH1HST、AKIHABARA-GIKEN）配布アーカイブ `PSRTTY-1.16.tar.gz`（内部 `__version__` は 1.15）
++- 対象OS: Ubuntu 26.04 LTS（Ubuntu 24.04 LTS 上で動作確認）、x86_64 / aarch64
++- 名称: **PSRTTY 1.15 Linux port 1.0**（作者公式版・作者保証版ではありません）
++- 元ソースの `docs/DISTRIBUTION_TERMS.txt` に従い、改変点は本書の「変更点」、元の著作権表示は保持しています。
++  配布する場合は、作者への事前通知と、改良版ソース全体・ビルド用スクリプトの提供が必要です。
++
++## 導入
++
++```bash
++# 元の tar.gz を展開し、パッチを当てる
++tar xzf PSRTTY-1.16.tar.gz && cd PSRTTY-1.16
++patch -p1 < ../psrtty-linux.patch      # 新規ファイル（*.sh, requirements-linux.txt 等）も含む
++./install-linux.sh --hamlib            # apt依存 + venv + Hamlib 5(git)ビルド→/usr/local + デスクトップ登録
++sudo usermod -aG dialout $USER         # CAT/外部PTTのシリアルに必須（再ログイン）
++./psrtty.sh
++```
++
++`--no-apt` で apt を省略。Hamlib 5 が既にシステムにある（`ldconfig -p | grep libhamlib.so.5`）なら `--hamlib` は不要です。
++
++## 変更点（Windows依存の除去）
++
++| 箇所 | 内容 |
++|---|---|
++| `psrtty/paths.py` | `data_root()` 追加。config/logdata/var は従来どおり配置フォルダー、書き込み不可なら `~/.local/share/psrtty`。`PSRTTY_HOME` で上書き可 |
++| `psrtty/app.py` | 保存先を `data_root()` へ。Linuxで `setDesktopFileName("psrtty")`（アイコン/タスクバー対応） |
++| `psrtty/i18n.py`, `ui/cabrillo_dialog.py` | `var/` ログを `data_root()` へ |
++| `psrtty/hamlib_radio.py` | **Hamlib 5 をシステムの共有ライブラリとして動的リンク**（探索順: `PSRTTY_HAMLIB` → `libhamlib.so.5` → `find_library` → `libhamlib.so.4` → 同梱 `lib/hamlib/`）。`rig_get_caps()` で機種の有無を事前確認（未対応Hamlibで `rig_init()` が**プロセスごと abort**する問題の回避）。`token`を`long`で受け渡し（Hamlib 5のABI）。`runtime_version()`追加 |
++| `psrtty/ui/about_dialog.py` | Linuxでは実際にロードされたlibhamlibの版（`rig_version()`）を表示 |
++| `psrtty/civ.py` | `/dev/ttyUSB*` 等に権限がない場合、候補表示と接続失敗に `dialout` の案内を追加 |
++| `psrtty/ui/guide.py`, `frequency_guide.py` | 日本語フォントに `Noto Sans CJK JP` を追加（Yu Gothic UIが無い環境） |
++| 新規 | `install-linux.sh` `build-hamlib-linux.sh` `psrtty.sh` `psrtty.desktop.in` `requirements-linux.txt` |
++
++既に移植済みだった部分（変更不要）: PortAudio経由の音声（Windows固有のWASAPI処理は `sys.platform` 分岐済み）、
++ライブラリ探索（`libhamlib-4.so` → `ctypes.util.find_library`）、`QDesktopServices` によるフォルダー/ファイル表示、
++pyserialによるCI-V/CAT、`QLocalServer`（Unixドメインソケット）による二重起動防止。
++
++## Linuxで使えない／無効な機能
++
++- **アプリ内バージョンアップ（ZIP更新）**: Windows EXE専用。Linuxでは案内ダイアログのみ（更新はソース差し替え）
++- **Turbo HAMLOG連携**: `WM_COPYDATA` を使うWindows専用。Linuxでは `LinkError` で無効。HAMLOG CSV/ADIF出力は使用可
++- **PyInstaller / `build-windows.ps1` / `psrtty.spec`**: Windows用。Linuxはソース+venv配布（`psrtty.exe` 前提の更新機構が絡むため意図的に非凍結）
++- zLog/Z-Server連携、プリンター(シリアル)、Cabrillo、ADIFは動作に依存なし（TCP/シリアルのみ）
++
++## 既知の注意
++
++1. **Hamlib（動的リンク）**: `rigctld Hamlib 5.0.0~git 2026-10-12 SHA=d099fe27d` 相当の `libhamlib.so.5` をシステムから読み込みます。
++   同梱しません。上流 `master` のSONAME（`libhamlib.so.5`）・関数シグネチャ・全13機種のモデル番号は実ビルドで確認済みですが、
++   **指定コミット d099fe27d 自体は上流 master 上に見つからず（手元の master は 470518f, 2026-10-11）未検証**です。
++   Ubuntu標準のHamlib 4.5.5 では FTX-1 が存在せず、本移植版は選択時にエラー表示します（元のままだとアプリごと落ちます）。
++   別の場所のHamlibを使う場合: `PSRTTY_HAMLIB=/path/to/libhamlib.so.5 ./psrtty.sh`
++2. **音声デバイス**: Linuxでは ALSA/PulseAudio/PipeWire の全ホストAPIが `名前 [API #番号]` で列挙されます。
++   アプリは固定サンプルレート・モノラルで開くため、`hw:` 直指定より `pipewire` / `pulse` / `default` を選ぶのが安全です。
++3. **Wayland（26.04のGNOMEは既定）**: ウィンドウ位置の保存復元・前面化はコンポジターが制限します。`--reset-window` は有効。
++   XWaylandで動かす場合は `QT_QPA_PLATFORM=xcb ./psrtty.sh`。
++4. **シリアルのDTR/RTS**: LinuxではOS側が open 時に両線をアサートします。PTTをRTS/DTRで制御する配線では、接続時に一瞬送信状態になる可能性があります（実機未検証）。
++5. **ModemManager**: 一部USBシリアルを横取りしてCATが開けないことがあります（`sudo systemctl stop ModemManager` で切り分け）。
++6. 実機（無線機・声音デバイス）での送受信は**未検証**です。UI・設定・ロジックのテストのみ実施しました。
++
++## 検証結果
++
++Hamlib 5.0.0~git（上流master）をビルドし `LD_LIBRARY_PATH` で動的ロードして確認: バージョン取得、全13機種の存在、ダミー無線機での周波数の設定/取得、`rig_set_conf`。
++
++元ソースの `python -m unittest discover`（643件, `QT_QPA_PLATFORM=offscreen`）: 642件成功。
++失敗1件 `test_connect_failure_ui_keeps_ticking` はタイマー回数に依存する時間依存テスト（移植前の元ソースでも同じ結果）。
++移植後の結果は `TEST_RESULTS_LINUX.txt` を参照。
+diff -ruN -x var a/build-hamlib-linux.sh b/build-hamlib-linux.sh
+--- a/build-hamlib-linux.sh	1970-01-01 00:00:00.000000000 +0000
++++ b/build-hamlib-linux.sh	2026-10-14 08:38:26.637071461 +0000
+@@ -0,0 +1,21 @@
++#!/usr/bin/env bash
++# Hamlib 5.x をgitからビルドし、システムの共有ライブラリ(/usr/local/lib/libhamlib.so.5)として導入する。
++# PSRTTYは libhamlib.so.5 を動的リンクで利用する（同梱しない）。
++#   ./build-hamlib-linux.sh [REF]     REF = ブランチ/タグ/コミット（既定: master）
++#   PREFIX=/usr/local ./build-hamlib-linux.sh d099fe27d
++set -euo pipefail
++REF="${1:-master}"
++PREFIX="${PREFIX:-/usr/local}"
++WORK="$(mktemp -d)"
++trap 'rm -rf "$WORK"' EXIT
++git clone https://github.com/Hamlib/Hamlib.git "$WORK/src"
++cd "$WORK/src"
++git checkout "$REF"
++./bootstrap
++./configure --prefix="$PREFIX" --disable-static --without-cxx-binding \
++            --without-python-binding --without-perl-binding --without-lua-binding --without-tcl-binding
++make -j"$(nproc)"
++if [ -w "$PREFIX" ]; then make install; else sudo make install; fi
++sudo ldconfig
++ldconfig -p | grep libhamlib || true
++"$PREFIX/bin/rigctld" --version || true
+diff -ruN -x var a/install-linux.sh b/install-linux.sh
+--- a/install-linux.sh	1970-01-01 00:00:00.000000000 +0000
++++ b/install-linux.sh	2026-10-14 08:38:26.637278288 +0000
+@@ -0,0 +1,41 @@
++#!/usr/bin/env bash
++# PSRTTY Linux版セットアップ（Ubuntu 24.04 / 26.04 LTS 想定）
++#   ./install-linux.sh              依存パッケージ導入 + venv + デスクトップ登録
++#   ./install-linux.sh --hamlib     上記に加えHamlib 5(git)をビルドし /usr/local に導入（libhamlib.so.5 を動的リンク）
++#   ./install-linux.sh --no-apt     apt を実行しない（導入済みの場合）
++set -euo pipefail
++cd "$(dirname "$0")"
++DIR="$PWD"
++APT=1; HAMLIB=0
++for a in "$@"; do case "$a" in --no-apt) APT=0;; --hamlib) HAMLIB=1;; *) echo "不明な引数: $a" >&2; exit 2;; esac; done
++
++PKGS=(python3 python3-venv python3-pip
++      libportaudio2 libusb-1.0-0
++      libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3
++      libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0
++      libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1
++      fonts-noto-cjk fonts-noto-core)
++if [ "$HAMLIB" = 1 ]; then PKGS+=(build-essential curl libusb-1.0-0-dev libtool pkg-config autoconf automake git); fi
++if [ "$APT" = 1 ]; then sudo apt-get update && sudo apt-get install -y "${PKGS[@]}"; fi
++
++python3 -m venv .venv
++.venv/bin/pip install --upgrade pip
++.venv/bin/pip install -r requirements-linux.txt
++
++if [ "$HAMLIB" = 1 ]; then ./build-hamlib-linux.sh; fi
++if ! ldconfig -p | grep -q 'libhamlib\.so\.5'; then
++  echo "注意: libhamlib.so.5 (Hamlib 5) が見つかりません。--hamlib で導入するか PSRTTY_HAMLIB=/path/libhamlib.so.5 を指定してください。"
++  echo "      libhamlib.so.4 があればフォールバックしますが、FTX-1等は未対応の場合があります。"
++fi
++
++chmod +x psrtty.sh
++APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
++mkdir -p "$APPS"
++sed -e "s|@DIR@|$DIR|g" psrtty.desktop.in > "$APPS/psrtty.desktop"
++echo "デスクトップ登録: $APPS/psrtty.desktop"
++
++if ! id -nG | tr ' ' '\n' | grep -qx dialout; then
++  echo "注意: シリアルCAT/PTTを使うには dialout グループが必要です:"
++  echo "  sudo usermod -aG dialout \$USER   （その後ログアウト/ログイン）"
++fi
++echo "完了。起動: $DIR/psrtty.sh"
+diff -ruN -x var a/psrtty/app.py b/psrtty/app.py
+--- a/psrtty/app.py	2026-10-14 08:38:26.610551710 +0000
++++ b/psrtty/app.py	2026-10-14 08:38:26.669127991 +0000
+@@ -7,7 +7,7 @@
+ 
+ from . import __version__
+ from .single_instance import ActivationServer, request_activation
+-from .paths import resource_path, ensure_runtime_dirs, app_root
++from .paths import resource_path, ensure_runtime_dirs, app_root, data_root
+ from .backup import check_log_writable
+ from .i18n import configure, install_qt_translation, tr
+ from .config import ConfigStore
+@@ -18,10 +18,12 @@
+     from .app_identity import configure_app_identity, application_icon
+     configure_app_identity()
+     app = QApplication(sys.argv)
++    if sys.platform.startswith("linux"):
++        app.setDesktopFileName("psrtty")  # match psrtty.desktop for icon/taskbar grouping
+     # Load saved display preference before any startup error can be shown.
+     configure(ConfigStore().data["ui"].get("language", "ja"))
+     install_qt_translation()
+-    log_dir = app_root() / "logdata"
++    log_dir = data_root() / "logdata"
+     try:
+         check_log_writable(log_dir)
+         paths = ensure_runtime_dirs()
+diff -ruN -x var a/psrtty/civ.py b/psrtty/civ.py
+--- a/psrtty/civ.py	2026-10-14 08:38:26.610975650 +0000
++++ b/psrtty/civ.py	2026-10-14 08:38:26.670016855 +0000
+@@ -1,6 +1,8 @@
+ from __future__ import annotations
+ from .i18n import tr
+ 
++import os
++import sys
+ import threading
+ import time
+ from .radio_support import LEGACY_FREQUENCY
+@@ -14,6 +16,14 @@
+     list_ports = None
+ 
+ 
++def port_denied(device: str) -> bool:
++    """Linux: the serial device exists but this user may not open it (needs the dialout group)."""
++    return sys.platform != "win32" and os.path.exists(device) and not os.access(device, os.R_OK | os.W_OK)
++
++
++DENIED_HINT = "（権限なし: sudo usermod -aG dialout $USER 後に再ログイン）"
++
++
+ @dataclass
+ class CIVStatus:
+     connected: bool = False
+@@ -62,6 +72,8 @@
+         for p in sorted(list_ports.comports()):
+             name = (p.description or '').strip()
+             label = f'{p.device} — {name}' if name and name != 'n/a' else p.device
++            if port_denied(p.device):
++                label += ' ' + DENIED_HINT
+             choices.append((p.device, label))
+         return choices
+ 
+@@ -146,6 +158,9 @@
+                             pass
+                     self.ser = None
+         self.status = CIVStatus(False, message=tr('ui.449e04d36873e83e'))
++        denied = [c for c in ports if port_denied(c)]
++        if denied:
++            self.status.message += ' ' + tr(f"{', '.join(denied)} " + DENIED_HINT)
+         return self.status
+ 
+     def disconnect(self) -> None:
+diff -ruN -x var a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
+--- a/psrtty/hamlib_radio.py	2026-10-14 08:38:26.612137920 +0000
++++ b/psrtty/hamlib_radio.py	2026-10-14 08:38:26.671442279 +0000
+@@ -7,6 +7,7 @@
+ from .i18n import tr
+ 
+ import ctypes
++import re
+ import ctypes.util
+ import os
+ import sys
+@@ -15,7 +16,7 @@
+ from .civ import CIVController, CIVStatus
+ from .paths import app_root
+ 
+-HAMLIB_VERSION = '4.7.2'
++HAMLIB_VERSION = '5.0'  # Linux移植版の対象。システムの共有ライブラリ(libhamlib.so.5)を動的リンク
+ HAMLIB_MODELS = {
+     'FT-817 / FT-817ND': (1020, 'Yaesu FT-817 / FT-817ND'),
+     'FT-818ND': (1041, 'Yaesu FT-818ND'),
+@@ -58,15 +59,22 @@
+     if path is not None:
+         yield path
+         return
+-    yield library_path()
+-    for name in ('hamlib-4', 'hamlib'):
++    # Linux/macOS: dynamic link against the system Hamlib. PSRTTY_HAMLIB overrides;
++    # Hamlib 5 (SONAME libhamlib.so.5) is preferred over 4.x; a bundled copy is the last resort.
++    override = os.environ.get('PSRTTY_HAMLIB')
++    if override:
++        yield override
++    if sys.platform == 'darwin':
++        yield from ('libhamlib.5.dylib', 'libhamlib.4.dylib')
++    else:
++        yield from ('libhamlib.so.5', 'libhamlib-5.so')
++    for name in ('hamlib', 'hamlib-5', 'hamlib-4'):
+         found = ctypes.util.find_library(name)
+         if found:
+             yield found
+-    if sys.platform == 'win32':
+-        yield 'libhamlib-4.dll'
+-    elif sys.platform == 'darwin':
+-        yield 'libhamlib-4.dylib'
++    if sys.platform != 'darwin':
++        yield 'libhamlib.so.4'
++    yield library_path()
+ 
+ 
+ def load_library(path=None):
+@@ -108,8 +116,8 @@
+         'rig_cleanup':(ctypes.c_int,[ctypes.c_void_p]),
+         'rig_open':(ctypes.c_int,[ctypes.c_void_p]),
+         'rig_close':(ctypes.c_int,[ctypes.c_void_p]),
+-        'rig_token_lookup':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_char_p]),
+-        'rig_set_conf':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_int,ctypes.c_char_p]),
++        'rig_token_lookup':(ctypes.c_long,[ctypes.c_void_p,ctypes.c_char_p]),
++        'rig_set_conf':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_long,ctypes.c_char_p]),
+         'rig_get_freq':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_uint,ctypes.POINTER(ctypes.c_double)]),
+         'rig_set_freq':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_uint,ctypes.c_double]),
+         'rig_get_ptt':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_uint,ctypes.POINTER(ctypes.c_int)]),
+@@ -134,6 +142,37 @@
+     return lib,directory
+ 
+ 
++def runtime_version(lib=None):
++    """Version string of the dynamically linked libhamlib, e.g. '5.0.0~git' (None if unknown)."""
++    try:
++        if lib is None:
++            lib, directory = load_library()
++            if directory:
++                directory.close()
++        lib.rig_version.restype = ctypes.c_char_p
++        text = (lib.rig_version() or b'').decode('ascii', 'replace')
++    except Exception:
++        return None
++    match = re.search(r'\d+\.\d+\.\d+\S*', text)
++    return match.group(0)[:30] if match else None
++
++
++def model_supported(lib, model_id):
++    """False when this libhamlib has no backend for model_id.
++
++    System libhamlib (e.g. distro 4.5/4.6) can predate a model; rig_init() then
++    aborts the whole process ("Hash collision!!! Fatal error!!"), so probe first.
++    """
++    try:
++        lib.rig_load_all_backends.restype = None
++        lib.rig_get_caps.restype = ctypes.c_void_p
++        lib.rig_get_caps.argtypes = [ctypes.c_int]
++        lib.rig_load_all_backends()
++        return bool(lib.rig_get_caps(model_id))
++    except AttributeError:
++        return True
++
++
+ class HamlibController(CIVController):
+     def __init__(self, model):
+         if model not in HAMLIB_MODELS:raise ValueError(tr('ui.0e1b2eddb0064736'))
+@@ -153,6 +192,8 @@
+                 return self.status
+             try:
+                 self.lib,self.dll_directory=load_library()
++                if not model_supported(self.lib,HAMLIB_MODELS[self.model][0]):
++                    raise RuntimeError(tr(f'このHamlibは {HAMLIB_MODELS[self.model][1]} に未対応です。Hamlib {HAMLIB_VERSION} 以上（libhamlib.so.5）を導入してください。'))
+                 self.handle=self.lib.rig_init(HAMLIB_MODELS[self.model][0])
+                 if not self.handle:raise RuntimeError(tr('ui.7e5e540d968b10d3'))
+                 self._configure('rig_pathname',port)
+diff -ruN -x var a/psrtty/i18n.py b/psrtty/i18n.py
+--- a/psrtty/i18n.py	2026-10-14 08:38:26.612313312 +0000
++++ b/psrtty/i18n.py	2026-10-14 08:38:26.671862796 +0000
+@@ -12,7 +12,7 @@
+ from string import Formatter
+ from .english_fallback import STRINGS as ENGLISH
+ from .language_index import ALIASES, GUIDE_KEYS
+-from .paths import app_root, resource_path
++from .paths import app_root, data_root, resource_path
+ 
+ LANGUAGES = ('ja', 'en', 'ru', 'zh', 'ko', 'id', 'th', 'es')
+ LANGUAGE = 'ja'  # effective display language; requested setting is never rewritten
+@@ -77,7 +77,7 @@
+     _seen.add(problem);_issues.append(problem)
+     logging.getLogger('psrtty.language').warning('%s: %s: %s',*problem)
+     try:
+-        path=app_root()/'var'/'language.log';path.parent.mkdir(parents=True,exist_ok=True)
++        path=data_root()/'var'/'language.log';path.parent.mkdir(parents=True,exist_ok=True)
+         if path.exists() and path.stat().st_size>1024*1024:
+             path.replace(path.with_suffix('.log.1'))
+         with path.open('a',encoding='utf-8') as f:f.write(' | '.join(problem)+'\n')
+diff -ruN -x var a/psrtty/paths.py b/psrtty/paths.py
+--- a/psrtty/paths.py	2026-10-14 08:38:26.612846476 +0000
++++ b/psrtty/paths.py	2026-10-14 08:38:26.672708297 +0000
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++import os
+ import sys
+ from pathlib import Path
+ 
+@@ -15,13 +16,30 @@
+     return Path(__file__).resolve().parents[1]
+ 
+ 
++def data_root() -> Path:
++    """Return the writable root for config/logdata/var.
++
++    PSRTTY_HOME overrides everything. Otherwise the installation folder is used
++    when writable (original behaviour); on Linux a read-only install (e.g. under
++    /opt) falls back to $XDG_DATA_HOME/psrtty (~/.local/share/psrtty).
++    """
++    override = os.environ.get("PSRTTY_HOME")
++    if override:
++        return Path(override).expanduser().resolve()
++    root = app_root()
++    if sys.platform == "win32" or os.access(root, os.W_OK):
++        return root
++    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
++    return Path(base) / "psrtty"
++
++
+ def resource_path(relative: str) -> Path:
+     base = Path(getattr(sys, "_MEIPASS", app_root()))
+     return base / relative
+ 
+ 
+ def ensure_runtime_dirs() -> dict[str, Path]:
+-    root = app_root()
++    root = data_root()
+     paths = {
+         "root": root,
+         "config": root / "config",
+diff -ruN -x var a/psrtty/ui/about_dialog.py b/psrtty/ui/about_dialog.py
+--- a/psrtty/ui/about_dialog.py	2026-10-14 08:38:26.613649009 +0000
++++ b/psrtty/ui/about_dialog.py	2026-10-14 08:38:26.674351513 +0000
+@@ -7,6 +7,7 @@
+ from PySide6.QtGui import QPixmap, QDesktopServices
+ from PySide6.QtWidgets import QDialog, QLabel, QScrollArea, QVBoxLayout, QHBoxLayout, QFrame, QWidget, QPushButton
+ 
++import sys
+ from .. import __version__
+ from ..paths import resource_path
+ from ..paths import app_root
+@@ -14,7 +15,11 @@
+ 
+ def hamlib_about():
+     version=app_root()/'lib/hamlib/VERSION.txt'
+-    if not version.is_file():return tr('ui.2d449b2b5ce5c372')
++    if sys.platform!='win32' or not version.is_file():
++        from ..hamlib_radio import runtime_version
++        value=runtime_version()  # dynamically linked system libhamlib
++        if value:return tr('ui.c2f9ceee5a00ecff').format(value=value)
++        return tr('ui.2d449b2b5ce5c372')
+     try:
+         value=version.read_text(encoding='ascii').strip()
+         if not value or len(value)>30:return tr('ui.10166ff42a6f44b6')
+diff -ruN -x var a/psrtty/ui/cabrillo_dialog.py b/psrtty/ui/cabrillo_dialog.py
+--- a/psrtty/ui/cabrillo_dialog.py	2026-10-14 08:38:26.613941004 +0000
++++ b/psrtty/ui/cabrillo_dialog.py	2026-10-14 08:38:26.674457232 +0000
+@@ -12,7 +12,7 @@
+ from PySide6.QtWidgets import (QDialog,QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QPushButton,
+     QSizePolicy,QRadioButton,QButtonGroup,QStackedWidget,QLineEdit,QComboBox,QSpinBox,QDateTimeEdit,QTableWidget,
+     QTableWidgetItem,QHeaderView,QAbstractItemView,QPlainTextEdit,QScrollArea,QMessageBox,QFileDialog,QCheckBox)
+-from ..paths import app_root
++from ..paths import app_root, data_root
+ from ..paths import resource_path
+ from ..jarl_score import calculate, CONTINENTS, location_label
+ import csv
+@@ -445,7 +445,7 @@
+     def record_diagnostic(self,context,exc):
+         try:
+             parent=self.parent()
+-            folder=Path(parent.paths['var']) if parent is not None and hasattr(parent,'paths') else app_root()/'var'
++            folder=Path(parent.paths['var']) if parent is not None and hasattr(parent,'paths') else data_root()/'var'
+             folder.mkdir(parents=True,exist_ok=True)
+             path=folder/f'cabrillo_{datetime.now():%Y%m%d}.log'
+             with path.open('a',encoding='utf-8') as stream:
+diff -ruN -x var a/psrtty/ui/frequency_guide.py b/psrtty/ui/frequency_guide.py
+--- a/psrtty/ui/frequency_guide.py	2026-10-14 08:38:26.614408522 +0000
++++ b/psrtty/ui/frequency_guide.py	2026-10-14 08:38:26.674331905 +0000
+@@ -18,7 +18,7 @@
+         layout.addWidget(self.tabs)
+         style = STYLE
+         if i18n.LANGUAGE == 'th':
+-            style = style.replace('"Yu Gothic UI", sans-serif', '"Leelawadee UI", "Noto Sans Thai", "Tahoma", sans-serif')
++            style = style.replace('"Yu Gothic UI", "Noto Sans CJK JP", "Noto Sans JP", sans-serif', '"Leelawadee UI", "Noto Sans Thai", "Tahoma", sans-serif')
+         for region in (None,) + REGIONS:
+             browser = QTextBrowser()
+             browser.setOpenExternalLinks(True)
+diff -ruN -x var a/psrtty/ui/guide.py b/psrtty/ui/guide.py
+--- a/psrtty/ui/guide.py	2026-10-14 08:38:26.614459091 +0000
++++ b/psrtty/ui/guide.py	2026-10-14 08:38:26.674306572 +0000
+@@ -7,7 +7,7 @@
+ from PySide6.QtGui import QFont
+ from PySide6.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QTextBrowser, QPushButton
+ 
+-STYLE='''body { color:#643600; background:#fffaf2; font-family:"Yu Gothic UI", sans-serif; }
++STYLE='''body { color:#643600; background:#fffaf2; font-family:"Yu Gothic UI", "Noto Sans CJK JP", "Noto Sans JP", sans-serif; }
+ h2 { color:#b85d00; } h3 { color:#a35408; margin-top:20px; }
+ p,li { line-height:1.65; margin-bottom:12px; }
+ table { border-collapse:collapse; width:100%; }
+@@ -35,7 +35,7 @@
+             browser=QTextBrowser(); font=QFont(); font.setPointSize(11); browser.setFont(font)
+             style = STYLE
+             if i18n.LANGUAGE == "th":
+-                style = style.replace('"Yu Gothic UI", sans-serif', '"Leelawadee UI", "Noto Sans Thai", "Tahoma", sans-serif')
++                style = style.replace('"Yu Gothic UI", "Noto Sans CJK JP", "Noto Sans JP", sans-serif', '"Leelawadee UI", "Noto Sans Thai", "Tahoma", sans-serif')
+             browser.document().setDefaultStyleSheet(style)
+             browser.setHtml(body); self.tabs.addTab(browser,title)
+         close=QPushButton(tr('ui.f6c244f98893cd95')); close.clicked.connect(self.hide); root.addWidget(close)
+diff -ruN -x var a/psrtty.desktop.in b/psrtty.desktop.in
+--- a/psrtty.desktop.in	1970-01-01 00:00:00.000000000 +0000
++++ b/psrtty.desktop.in	2026-10-14 08:38:26.637379810 +0000
+@@ -0,0 +1,9 @@
++[Desktop Entry]
++Type=Application
++Name=PSRTTY
++Comment=RTTY decoder/encoder
++Exec=@DIR@/psrtty.sh
++Icon=@DIR@/assets/psrtty.png
++Terminal=false
++Categories=HamRadio;AudioVideo;
++StartupWMClass=psrtty
+diff -ruN -x var a/psrtty.sh b/psrtty.sh
+--- a/psrtty.sh	1970-01-01 00:00:00.000000000 +0000
++++ b/psrtty.sh	2026-10-14 08:38:26.637173455 +0000
+@@ -0,0 +1,5 @@
++#!/usr/bin/env bash
++# PSRTTY 起動スクリプト（Linux）。install-linux.sh が作る .venv を使用する。
++DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
++if [ -x "$DIR/.venv/bin/python" ]; then PY="$DIR/.venv/bin/python"; else PY="$(command -v python3)"; fi
++exec "$PY" "$DIR/psrtty.py" "$@"
+diff -ruN -x var a/requirements-linux.txt b/requirements-linux.txt
+--- a/requirements-linux.txt	1970-01-01 00:00:00.000000000 +0000
++++ b/requirements-linux.txt	2026-10-14 08:38:26.636940253 +0000
+@@ -0,0 +1,4 @@
++PySide6>=6.7,<7
++numpy>=1.26,<3
++sounddevice>=0.5.6,<1
++pyserial>=3.5,<4
+diff -ruN -x var a/tests/test_hamlib_089.py b/tests/test_hamlib_089.py
+--- a/tests/test_hamlib_089.py	2026-10-14 08:38:26.624330350 +0000
++++ b/tests/test_hamlib_089.py	2026-10-14 08:38:26.680430010 +0000
+@@ -1,3 +1,4 @@
++from pathlib import Path
+ import unittest
+ from unittest.mock import patch
+ 
+@@ -44,11 +45,12 @@
+                 self.rig_set_mode = FakeFunction()
+ 
+         with patch('psrtty.hamlib_radio.sys.platform', 'freebsd13'), \
++             patch('psrtty.hamlib_radio.library_path', return_value=Path('/nonexistent/libhamlib-4.so')), \
+              patch('psrtty.hamlib_radio.ctypes.util.find_library', return_value='libhamlib-4.so.4'), \
+              patch('psrtty.hamlib_radio.ctypes.CDLL', return_value=FakeLibrary()) as cdll:
+             lib, directory = load_library()
+         self.assertIsNone(directory)
+-        self.assertEqual(cdll.call_args[0][0], 'libhamlib-4.so.4')
++        self.assertEqual(cdll.call_args[0][0], 'libhamlib.so.5')  # Hamlib 5 SONAME is tried first
+         self.assertIsNotNone(lib)
+ 
+     def test_all_chosen_models_are_explicit(self):
+diff -ruN -x var a/tests/test_linux_port.py b/tests/test_linux_port.py
+--- a/tests/test_linux_port.py	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/test_linux_port.py	2026-10-14 08:38:26.680211564 +0000
+@@ -0,0 +1,52 @@
++import os
++import tempfile
++import unittest
++from pathlib import Path
++from unittest import mock
++
++from psrtty import paths
++from psrtty.hamlib_radio import model_supported
++
++
++class FakeLib:
++    def __init__(self, models):
++        self.models = models
++        self.rig_load_all_backends = mock.Mock()
++        self.rig_get_caps = lambda model: 1 if model in self.models else None
++
++
++class DataRootTests(unittest.TestCase):
++    def test_env_override(self):
++        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {'PSRTTY_HOME': td}):
++            self.assertEqual(paths.data_root(), Path(td).resolve())
++            root = paths.ensure_runtime_dirs()
++            self.assertEqual(root['config'], Path(td).resolve() / 'config')
++            self.assertTrue(root['logdata'].is_dir())
++
++    def test_readonly_install_uses_xdg(self):
++        with tempfile.TemporaryDirectory() as td, \
++                mock.patch.dict(os.environ, {'XDG_DATA_HOME': td}), \
++                mock.patch.object(paths.sys, 'platform', 'linux'), \
++                mock.patch.object(paths.os, 'access', return_value=False):
++            os.environ.pop('PSRTTY_HOME', None)
++            self.assertEqual(paths.data_root(), Path(td) / 'psrtty')
++
++    def test_writable_install_keeps_legacy_layout(self):
++        os.environ.pop('PSRTTY_HOME', None)
++        with mock.patch.object(paths.os, 'access', return_value=True):
++            self.assertEqual(paths.data_root(), paths.app_root())
++
++
++class HamlibGuardTests(unittest.TestCase):
++    def test_unknown_model_is_refused_not_initialised(self):
++        self.assertFalse(model_supported(FakeLib({1035}), 1051))
++
++    def test_known_model_passes(self):
++        self.assertTrue(model_supported(FakeLib({1051}), 1051))
++
++    def test_library_without_probe_symbols_does_not_block(self):
++        self.assertTrue(model_supported(object(), 1051))
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff -ruN -x var a/tests/test_v111.py b/tests/test_v111.py
+--- a/tests/test_v111.py	2026-10-14 08:38:26.626691513 +0000
++++ b/tests/test_v111.py	2026-10-14 08:38:26.680148483 +0000
+@@ -17,9 +17,10 @@
+         self.catalog = self.root / 'language'
+         shutil.copytree(ROOT / 'language', self.catalog)
+         self.patch = patch('psrtty.i18n.app_root', return_value=self.root)
++        self.patch_data = patch('psrtty.i18n.data_root', return_value=self.root); self.patch_data.start()
+         self.patch.start()
+     def tearDown(self):
+-        self.patch.stop()
++        self.patch.stop(); self.patch_data.stop()
+         i18n.configure('ja')
+         self.tmp.cleanup()
+     def test_complete_and_embedded_english_matches(self):
+diff -ruN -x var a/tests/test_v112.py b/tests/test_v112.py
+--- a/tests/test_v112.py	2026-10-14 08:38:26.626750600 +0000
++++ b/tests/test_v112.py	2026-10-14 08:38:26.680179439 +0000
+@@ -23,9 +23,10 @@
+         self.catalog = self.root / 'language'
+         shutil.copytree(ROOT / 'language', self.catalog)
+         self.patch = patch('psrtty.i18n.app_root', return_value=self.root)
++        self.patch_data = patch('psrtty.i18n.data_root', return_value=self.root); self.patch_data.start()
+         self.patch.start()
+     def tearDown(self):
+-        self.patch.stop()
++        self.patch.stop(); self.patch_data.stop()
+         i18n.configure('ja')
+         i18n.install_qt_translation()
+         self.tmp.cleanup()
+diff -ruN -x var a/tests/test_v74.py b/tests/test_v74.py
+--- a/tests/test_v74.py	2026-10-14 08:38:26.627688087 +0000
++++ b/tests/test_v74.py	2026-10-14 08:38:26.681660404 +0000
+@@ -55,7 +55,7 @@
+ 
+     def test_startup_failure_never_constructs_mainwindow(self):
+         from psrtty import app
+-        with patch.object(app,'QApplication',return_value=self.app), patch.object(app,'app_root',return_value=Path(self.tmp.name)), patch.object(app,'check_log_writable',side_effect=PermissionError('read only')), patch.object(app,'MainWindow') as main, patch.object(app.QMessageBox,'critical') as message:
++        with patch.object(app,'QApplication',return_value=self.app), patch.object(app,'app_root',return_value=Path(self.tmp.name)), patch.object(app,'data_root',return_value=Path(self.tmp.name)), patch.object(app,'check_log_writable',side_effect=PermissionError('read only')), patch.object(app,'MainWindow') as main, patch.object(app.QMessageBox,'critical') as message:
+             self.assertEqual(app.run(),1);main.assert_not_called()
+             self.assertIn('read only',message.call_args.args[2])
+ 
