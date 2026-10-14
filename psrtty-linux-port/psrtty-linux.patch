@@ -1,12 +1,14 @@
-diff -ruN -x var a/LINUX_PORT.md b/LINUX_PORT.md
+diff -ruN -x var -x config -x logdata -x lib a/LINUX_PORT.md b/LINUX_PORT.md
 --- a/LINUX_PORT.md	1970-01-01 00:00:00.000000000 +0000
-+++ b/LINUX_PORT.md	2026-10-14 08:38:26.684811250 +0000
-@@ -0,0 +1,67 @@
++++ b/LINUX_PORT.md	2026-10-14 08:56:32.759123504 +0000
+@@ -0,0 +1,88 @@
 +# PSRTTY 1.15 Linux移植版（非公式）
++
++追加機能(1.1): **Hamlib rigctld へのTCP接続**（下記「rigctld接続」）。
 +
 +- 基礎: PSRTTY（H.Tanaka / JH1HST、AKIHABARA-GIKEN）配布アーカイブ `PSRTTY-1.16.tar.gz`（内部 `__version__` は 1.15）
 +- 対象OS: Ubuntu 26.04 LTS（Ubuntu 24.04 LTS 上で動作確認）、x86_64 / aarch64
-+- 名称: **PSRTTY 1.15 Linux port 1.0**（作者公式版・作者保証版ではありません）
++- 名称: **PSRTTY 1.15 Linux port 1.1**（作者公式版・作者保証版ではありません）
 +- 元ソースの `docs/DISTRIBUTION_TERMS.txt` に従い、改変点は本書の「変更点」、元の著作権表示は保持しています。
 +  配布する場合は、作者への事前通知と、改良版ソース全体・ビルド用スクリプトの提供が必要です。
 +
@@ -23,6 +25,24 @@ diff -ruN -x var a/LINUX_PORT.md b/LINUX_PORT.md
 +
 +`--no-apt` で apt を省略。Hamlib 5 が既にシステムにある（`ldconfig -p | grep libhamlib.so.5`）なら `--hamlib` は不要です。
 +
++## rigctld接続（TCP）
++
++設定画面「無線機」タブで Yaesu/Kenwood（Hamlib機種）を選ぶと **接続方式** が現れます。
++
++| 項目 | 内容 |
++|---|---|
++| 接続方式 | `シリアル（直接）`（従来）／`rigctld（TCP）` |
++| rigctldホスト | 既定 `127.0.0.1`（他PC・VMのrigctldも可） |
++| rigctldポート | 既定 `4532`（1～65535） |
++
++- 機種は **rigctld側につないだ無線機** に合わせて選びます（フィルター幅・データモード等の機種別制御に使用）。COMポートとCAT速度は不要です。
++- 例: `rigctld -m 1035 -r /dev/ttyUSB0 -s 38400` を起動 → PSRTTYで `FT-991/A`・`rigctld（TCP）`・`127.0.0.1:4532`
++- 実装: Hamlib の NET rigctl バックエンド（`RIG_MODEL_NETRIGCTL`=2）を動的リンクした libhamlib 経由で使用します。接続前に3秒のTCP疎通確認を行い、失敗時は接続先付きのエラーを表示します。周波数・PTT・モード・NB/NR・フィルター・ALC/SWR/PWRは従来のHamlib機種と同じ経路です。
++- 設定保存: `radio.link` (`serial`/`rigctld`)、`radio.rigctld_host`、`radio.rigctld_port`。プロファイルごとに保存され、ALC較正の識別にも含まれます（シリアル利用者の既存較正は影響なし）。
++- 8言語（ja/en/ru/zh/ko/id/th/es）の文言を追加（`rigctld.*`）。ロシア語以下6言語の訳は機械的な短文で、ネイティブ確認はしていません。
++- 注意: rigctld は認証も暗号化も持ちません。信頼できるネットワーク内でのみ使用してください。
++- 検証: Hamlib 5.0.0~git の `rigctld -m 1`（ダミー無線機）に実接続し、接続・周波数設定/取得・PTT ON/OFF・モード設定、接続拒否時のエラー表示を確認。実機は未検証。
++
 +## 変更点（Windows依存の除去）
 +
 +| 箇所 | 内容 |
@@ -34,6 +54,7 @@ diff -ruN -x var a/LINUX_PORT.md b/LINUX_PORT.md
 +| `psrtty/ui/about_dialog.py` | Linuxでは実際にロードされたlibhamlibの版（`rig_version()`）を表示 |
 +| `psrtty/civ.py` | `/dev/ttyUSB*` 等に権限がない場合、候補表示と接続失敗に `dialout` の案内を追加 |
 +| `psrtty/ui/guide.py`, `frequency_guide.py` | 日本語フォントに `Noto Sans CJK JP` を追加（Yu Gothic UIが無い環境） |
++| `psrtty/hamlib_radio.py` `radio.py` `alc_display.py` `ui/settings_dialog.py` `ui/main_window.py` `language/*.json` `english_fallback.py` | rigctld（TCP）接続（上記） |
 +| 新規 | `install-linux.sh` `build-hamlib-linux.sh` `psrtty.sh` `psrtty.desktop.in` `requirements-linux.txt` |
 +
 +既に移植済みだった部分（変更不要）: PortAudio経由の音声（Windows固有のWASAPI処理は `sys.platform` 分岐済み）、
@@ -69,9 +90,9 @@ diff -ruN -x var a/LINUX_PORT.md b/LINUX_PORT.md
 +元ソースの `python -m unittest discover`（643件, `QT_QPA_PLATFORM=offscreen`）: 642件成功。
 +失敗1件 `test_connect_failure_ui_keeps_ticking` はタイマー回数に依存する時間依存テスト（移植前の元ソースでも同じ結果）。
 +移植後の結果は `TEST_RESULTS_LINUX.txt` を参照。
-diff -ruN -x var a/build-hamlib-linux.sh b/build-hamlib-linux.sh
+diff -ruN -x var -x config -x logdata -x lib a/build-hamlib-linux.sh b/build-hamlib-linux.sh
 --- a/build-hamlib-linux.sh	1970-01-01 00:00:00.000000000 +0000
-+++ b/build-hamlib-linux.sh	2026-10-14 08:38:26.637071461 +0000
++++ b/build-hamlib-linux.sh	2026-10-14 08:56:32.682203847 +0000
 @@ -0,0 +1,21 @@
 +#!/usr/bin/env bash
 +# Hamlib 5.x をgitからビルドし、システムの共有ライブラリ(/usr/local/lib/libhamlib.so.5)として導入する。
@@ -94,9 +115,9 @@ diff -ruN -x var a/build-hamlib-linux.sh b/build-hamlib-linux.sh
 +sudo ldconfig
 +ldconfig -p | grep libhamlib || true
 +"$PREFIX/bin/rigctld" --version || true
-diff -ruN -x var a/install-linux.sh b/install-linux.sh
+diff -ruN -x var -x config -x logdata -x lib a/install-linux.sh b/install-linux.sh
 --- a/install-linux.sh	1970-01-01 00:00:00.000000000 +0000
-+++ b/install-linux.sh	2026-10-14 08:38:26.637278288 +0000
++++ b/install-linux.sh	2026-10-14 08:56:32.682629365 +0000
 @@ -0,0 +1,41 @@
 +#!/usr/bin/env bash
 +# PSRTTY Linux版セットアップ（Ubuntu 24.04 / 26.04 LTS 想定）
@@ -139,9 +160,184 @@ diff -ruN -x var a/install-linux.sh b/install-linux.sh
 +  echo "  sudo usermod -aG dialout \$USER   （その後ログアウト/ログイン）"
 +fi
 +echo "完了。起動: $DIR/psrtty.sh"
-diff -ruN -x var a/psrtty/app.py b/psrtty/app.py
---- a/psrtty/app.py	2026-10-14 08:38:26.610551710 +0000
-+++ b/psrtty/app.py	2026-10-14 08:38:26.669127991 +0000
+diff -ruN -x var -x config -x logdata -x lib a/language/en.json b/language/en.json
+--- a/language/en.json	2026-10-14 08:56:31.534043276 +0000
++++ b/language/en.json	2026-10-14 08:56:32.714561985 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "Reading radio status.",
+     "v115fix4.audio_check": "Check Audio settings!",
+     "v115fix4.usb_check": "With USB-Audio, check that the radio’s DATA audio input is also set to USB.",
+-    "v115fix4.usb_example_note": "ICOM examples. Displays vary by model and firmware."
++    "v115fix4.usb_example_note": "ICOM examples. Displays vary by model and firmware.",
++    "rigctld.link": "Connection",
++    "rigctld.serial": "Serial (direct)",
++    "rigctld.tcp": "rigctld (TCP)",
++    "rigctld.host": "rigctld host",
++    "rigctld.port": "rigctld port",
++    "rigctld.note": "Connects over TCP to a running Hamlib rigctld (e.g. rigctld -m 1035 -r /dev/ttyUSB0 -s 38400). Select the model of the radio behind rigctld. COM port and CAT speed are not needed. The default port is 4532.",
++    "rigctld.err_host": "Enter the rigctld host name or IP address.",
++    "rigctld.err_port": "Specify the rigctld port from 1 to 65535.",
++    "rigctld.fail": "Cannot connect to rigctld ({target}). Check that rigctld is running, and the host, port and firewall."
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/language/es.json b/language/es.json
+--- a/language/es.json	2026-10-14 08:56:31.534160410 +0000
++++ b/language/es.json	2026-10-14 08:56:32.714719459 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "Leyendo estado de la radio.",
+     "v115fix4.audio_check": "¡Revisa Audio!",
+     "v115fix4.usb_check": "Con USB-Audio, comprueba que la entrada de audio DATA de la radio también esté en USB.",
+-    "v115fix4.usb_example_note": "Ejemplos ICOM. La pantalla varía según modelo y firmware."
++    "v115fix4.usb_example_note": "Ejemplos ICOM. La pantalla varía según modelo y firmware.",
++    "rigctld.link": "Conexión",
++    "rigctld.serial": "Serie (directa)",
++    "rigctld.tcp": "rigctld (TCP)",
++    "rigctld.host": "Host de rigctld",
++    "rigctld.port": "Puerto de rigctld",
++    "rigctld.note": "Se conecta por TCP a un rigctld de Hamlib en ejecución (p. ej. rigctld -m 1035 -r /dev/ttyUSB0 -s 38400). Seleccione el modelo del equipo conectado a rigctld. No se necesitan puerto COM ni velocidad CAT. El puerto predeterminado es 4532.",
++    "rigctld.err_host": "Introduzca el nombre de host o la IP de rigctld.",
++    "rigctld.err_port": "Indique un puerto de rigctld entre 1 y 65535.",
++    "rigctld.fail": "No se puede conectar con rigctld ({target}). Compruebe que rigctld está en ejecución, el host, el puerto y el cortafuegos."
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/language/id.json b/language/id.json
+--- a/language/id.json	2026-10-14 08:56:31.534246005 +0000
++++ b/language/id.json	2026-10-14 08:56:32.714828329 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "Membaca status radio.",
+     "v115fix4.audio_check": "Cek Audio!",
+     "v115fix4.usb_check": "Saat memakai USB-Audio, cek juga input audio DATA radio: pilih USB.",
+-    "v115fix4.usb_example_note": "Contoh ICOM. Tampilan berbeda menurut model dan firmware."
++    "v115fix4.usb_example_note": "Contoh ICOM. Tampilan berbeda menurut model dan firmware.",
++    "rigctld.link": "Metode koneksi",
++    "rigctld.serial": "Serial (langsung)",
++    "rigctld.tcp": "rigctld (TCP)",
++    "rigctld.host": "Host rigctld",
++    "rigctld.port": "Port rigctld",
++    "rigctld.note": "Terhubung lewat TCP ke Hamlib rigctld yang sedang berjalan (contoh: rigctld -m 1035 -r /dev/ttyUSB0 -s 38400). Pilih model radio yang terhubung ke rigctld. Port COM dan kecepatan CAT tidak diperlukan. Port bawaan adalah 4532.",
++    "rigctld.err_host": "Masukkan nama host atau alamat IP rigctld.",
++    "rigctld.err_port": "Tentukan port rigctld antara 1 dan 65535.",
++    "rigctld.fail": "Tidak dapat terhubung ke rigctld ({target}). Periksa apakah rigctld berjalan, serta host, port, dan firewall."
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/language/ja.json b/language/ja.json
+--- a/language/ja.json	2026-10-14 08:56:31.534333139 +0000
++++ b/language/ja.json	2026-10-14 08:56:32.714925349 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "無線機の状態を取得しています。",
+     "v115fix4.audio_check": "Audio設定チェック！",
+     "v115fix4.usb_check": "USB-Audioの時は、無線機側のDATA音声入力も、USBになっているかチェックしてね。",
+-    "v115fix4.usb_example_note": "画面はICOMの例です。機種やファームウェアによって表示が異なります。"
++    "v115fix4.usb_example_note": "画面はICOMの例です。機種やファームウェアによって表示が異なります。",
++    "rigctld.link": "接続方式",
++    "rigctld.serial": "シリアル（直接）",
++    "rigctld.tcp": "rigctld（TCP）",
++    "rigctld.host": "rigctldホスト",
++    "rigctld.port": "rigctldポート",
++    "rigctld.note": "起動中のHamlib rigctld（例: rigctld -m 1035 -r /dev/ttyUSB0 -s 38400）へTCPで接続します。機種は rigctld 側の無線機に合わせて選択してください。COMポートとCAT速度は不要です。標準ポートは4532です。",
++    "rigctld.err_host": "rigctldのホスト名またはIPアドレスを入力してください。",
++    "rigctld.err_port": "rigctldのポートは1～65535で指定してください。",
++    "rigctld.fail": "rigctldに接続できません（{target}）。rigctldの起動、ホスト、ポート、ファイアウォールを確認してください。"
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/language/ko.json b/language/ko.json
+--- a/language/ko.json	2026-10-14 08:56:31.534491494 +0000
++++ b/language/ko.json	2026-10-14 08:56:32.715044389 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "무전기 상태를 읽는 중입니다.",
+     "v115fix4.audio_check": "오디오 설정 확인!",
+     "v115fix4.usb_check": "USB-Audio 사용 시 무전기의 DATA 오디오 입력도 USB인지 확인해 주세요.",
+-    "v115fix4.usb_example_note": "ICOM 예시입니다. 기종과 펌웨어에 따라 표시가 다릅니다."
++    "v115fix4.usb_example_note": "ICOM 예시입니다. 기종과 펌웨어에 따라 표시가 다릅니다.",
++    "rigctld.link": "연결 방식",
++    "rigctld.serial": "시리얼(직접)",
++    "rigctld.tcp": "rigctld (TCP)",
++    "rigctld.host": "rigctld 호스트",
++    "rigctld.port": "rigctld 포트",
++    "rigctld.note": "실행 중인 Hamlib rigctld(예: rigctld -m 1035 -r /dev/ttyUSB0 -s 38400)에 TCP로 연결합니다. rigctld에 연결된 무선기 기종을 선택하세요. COM 포트와 CAT 속도는 필요 없습니다. 기본 포트는 4532입니다.",
++    "rigctld.err_host": "rigctld의 호스트 이름 또는 IP 주소를 입력하세요.",
++    "rigctld.err_port": "rigctld 포트는 1~65535로 지정하세요.",
++    "rigctld.fail": "rigctld에 연결할 수 없습니다({target}). rigctld 실행 여부, 호스트, 포트, 방화벽을 확인하세요."
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/language/ru.json b/language/ru.json
+--- a/language/ru.json	2026-10-14 08:56:31.534592675 +0000
++++ b/language/ru.json	2026-10-14 08:56:32.715150121 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "Получение состояния радио.",
+     "v115fix4.audio_check": "Проверьте аудио!",
+     "v115fix4.usb_check": "При USB-Audio проверьте, что вход звука DATA в трансивере также установлен на USB.",
+-    "v115fix4.usb_example_note": "Примеры ICOM. Вид зависит от модели и прошивки."
++    "v115fix4.usb_example_note": "Примеры ICOM. Вид зависит от модели и прошивки.",
++    "rigctld.link": "Подключение",
++    "rigctld.serial": "Последовательный порт",
++    "rigctld.tcp": "rigctld (TCP)",
++    "rigctld.host": "Хост rigctld",
++    "rigctld.port": "Порт rigctld",
++    "rigctld.note": "Подключение по TCP к запущенному Hamlib rigctld (например: rigctld -m 1035 -r /dev/ttyUSB0 -s 38400). Выберите модель трансивера, подключённого к rigctld. COM-порт и скорость CAT не нужны. Порт по умолчанию — 4532.",
++    "rigctld.err_host": "Введите имя хоста или IP-адрес rigctld.",
++    "rigctld.err_port": "Укажите порт rigctld от 1 до 65535.",
++    "rigctld.fail": "Не удаётся подключиться к rigctld ({target}). Проверьте, что rigctld запущен, а также хост, порт и брандмауэр."
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/language/th.json b/language/th.json
+--- a/language/th.json	2026-10-14 08:56:31.534711281 +0000
++++ b/language/th.json	2026-10-14 08:56:32.715273661 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "กำลังอ่านสถานะวิทยุ",
+     "v115fix4.audio_check": "ตรวจการตั้งค่า Audio!",
+     "v115fix4.usb_check": "เมื่อใช้ USB-Audio ตรวจด้วยว่าอินพุตเสียง DATA ของวิทยุตั้งเป็น USB",
+-    "v115fix4.usb_example_note": "ตัวอย่าง ICOM หน้าจอแตกต่างตามรุ่นและเฟิร์มแวร์"
++    "v115fix4.usb_example_note": "ตัวอย่าง ICOM หน้าจอแตกต่างตามรุ่นและเฟิร์มแวร์",
++    "rigctld.link": "วิธีเชื่อมต่อ",
++    "rigctld.serial": "ซีเรียล (โดยตรง)",
++    "rigctld.tcp": "rigctld (TCP)",
++    "rigctld.host": "โฮสต์ rigctld",
++    "rigctld.port": "พอร์ต rigctld",
++    "rigctld.note": "เชื่อมต่อผ่าน TCP กับ Hamlib rigctld ที่กำลังทำงาน (เช่น rigctld -m 1035 -r /dev/ttyUSB0 -s 38400) เลือกรุ่นวิทยุที่ต่อกับ rigctld ไม่ต้องระบุพอร์ต COM และความเร็ว CAT พอร์ตเริ่มต้นคือ 4532",
++    "rigctld.err_host": "กรอกชื่อโฮสต์หรือที่อยู่ IP ของ rigctld",
++    "rigctld.err_port": "ระบุพอร์ต rigctld ระหว่าง 1 ถึง 65535",
++    "rigctld.fail": "เชื่อมต่อ rigctld ไม่ได้ ({target}) ตรวจสอบว่า rigctld ทำงานอยู่ รวมถึงโฮสต์ พอร์ต และไฟร์วอลล์"
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/language/zh.json b/language/zh.json
+--- a/language/zh.json	2026-10-14 08:56:31.534827199 +0000
++++ b/language/zh.json	2026-10-14 08:56:32.715399937 +0000
+@@ -1149,6 +1149,15 @@
+     "v115fix2.control_loading": "正在读取电台状态。",
+     "v115fix4.audio_check": "检查音频设置！",
+     "v115fix4.usb_check": "使用USB-Audio时，请检查电台的DATA音频输入是否也设为USB。",
+-    "v115fix4.usb_example_note": "ICOM示例。显示因机型和固件而异。"
++    "v115fix4.usb_example_note": "ICOM示例。显示因机型和固件而异。",
++    "rigctld.link": "连接方式",
++    "rigctld.serial": "串口（直连）",
++    "rigctld.tcp": "rigctld (TCP)",
++    "rigctld.host": "rigctld 主机",
++    "rigctld.port": "rigctld 端口",
++    "rigctld.note": "通过 TCP 连接到正在运行的 Hamlib rigctld（例如：rigctld -m 1035 -r /dev/ttyUSB0 -s 38400）。请选择 rigctld 所连接电台的型号。无需设置 COM 端口和 CAT 速度。默认端口为 4532。",
++    "rigctld.err_host": "请输入 rigctld 的主机名或 IP 地址。",
++    "rigctld.err_port": "rigctld 端口请指定为 1～65535。",
++    "rigctld.fail": "无法连接 rigctld（{target}）。请检查 rigctld 是否已启动，以及主机、端口和防火墙。"
+   }
+ }
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/alc_display.py b/psrtty/alc_display.py
+--- a/psrtty/alc_display.py	2026-10-14 08:56:31.939739274 +0000
++++ b/psrtty/alc_display.py	2026-10-14 08:56:32.729233583 +0000
+@@ -2,7 +2,10 @@
+ import math
+ 
+ def signature(radio,device):
+-    return [str(radio.get(k,'')) for k in ('model','com_port','civ_baud','civ_address','ptt','stopbits','auto_data_mode')]+[str(device or 'AUTO')]
++    keys=('model','com_port','civ_baud','civ_address','ptt','stopbits','auto_data_mode')
++    if radio.get('link')=='rigctld':  # identify the rig by its rigctld endpoint; serial users keep their old signature
++        keys+=('link','rigctld_host','rigctld_port')
++    return [str(radio.get(k,'')) for k in keys]+[str(device or 'AUTO')]
+ 
+ def calibration_onset(audio,radio):
+     c=audio.get('alc_calibration',{})
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/app.py b/psrtty/app.py
+--- a/psrtty/app.py	2026-10-14 08:56:31.939851914 +0000
++++ b/psrtty/app.py	2026-10-14 08:56:32.729364740 +0000
 @@ -7,7 +7,7 @@
  
  from . import __version__
@@ -165,9 +361,9 @@ diff -ruN -x var a/psrtty/app.py b/psrtty/app.py
      try:
          check_log_writable(log_dir)
          paths = ensure_runtime_dirs()
-diff -ruN -x var a/psrtty/civ.py b/psrtty/civ.py
---- a/psrtty/civ.py	2026-10-14 08:38:26.610975650 +0000
-+++ b/psrtty/civ.py	2026-10-14 08:38:26.670016855 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/civ.py b/psrtty/civ.py
+--- a/psrtty/civ.py	2026-10-14 08:56:31.940645459 +0000
++++ b/psrtty/civ.py	2026-10-14 08:56:32.729808833 +0000
 @@ -1,6 +1,8 @@
  from __future__ import annotations
  from .i18n import tr
@@ -211,9 +407,30 @@ diff -ruN -x var a/psrtty/civ.py b/psrtty/civ.py
          return self.status
  
      def disconnect(self) -> None:
-diff -ruN -x var a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
---- a/psrtty/hamlib_radio.py	2026-10-14 08:38:26.612137920 +0000
-+++ b/psrtty/hamlib_radio.py	2026-10-14 08:38:26.671442279 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/english_fallback.py b/psrtty/english_fallback.py
+--- a/psrtty/english_fallback.py	2026-10-14 08:56:31.983199203 +0000
++++ b/psrtty/english_fallback.py	2026-10-14 08:56:32.732238111 +0000
+@@ -2179,4 +2179,16 @@
+  'v115fix2.control_loading': 'Reading radio status.',
+  'v115fix4.audio_check': 'Check Audio settings!',
+  'v115fix4.usb_check': 'With USB-Audio, check that the radio’s DATA audio input is also set to USB.',
+- 'v115fix4.usb_example_note': 'ICOM examples. Displays vary by model and firmware.'}
++ 'v115fix4.usb_example_note': 'ICOM examples. Displays vary by model and firmware.',
++ 'rigctld.link': 'Connection',
++ 'rigctld.serial': 'Serial (direct)',
++ 'rigctld.tcp': 'rigctld (TCP)',
++ 'rigctld.host': 'rigctld host',
++ 'rigctld.port': 'rigctld port',
++ 'rigctld.note': 'Connects over TCP to a running Hamlib rigctld (e.g. rigctld -m 1035 -r /dev/ttyUSB0 -s 38400). '
++                 'Select the model of the radio behind rigctld. COM port and CAT speed are not needed. The default '
++                 'port is 4532.',
++ 'rigctld.err_host': 'Enter the rigctld host name or IP address.',
++ 'rigctld.err_port': 'Specify the rigctld port from 1 to 65535.',
++ 'rigctld.fail': 'Cannot connect to rigctld ({target}). Check that rigctld is running, and the host, port and '
++                 'firewall.'}
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
+--- a/psrtty/hamlib_radio.py	2026-10-14 08:56:31.984056514 +0000
++++ b/psrtty/hamlib_radio.py	2026-10-14 08:56:32.732548911 +0000
 @@ -7,6 +7,7 @@
  from .i18n import tr
  
@@ -231,7 +448,16 @@ diff -ruN -x var a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
  HAMLIB_MODELS = {
      'FT-817 / FT-817ND': (1020, 'Yaesu FT-817 / FT-817ND'),
      'FT-818ND': (1041, 'Yaesu FT-818ND'),
-@@ -58,15 +59,22 @@
+@@ -35,6 +36,8 @@
+     _fields_ = [('i', ctypes.c_int), ('f', ctypes.c_float), ('s', ctypes.c_char_p)]
+ 
+ 
++NETRIGCTL_MODEL = 2  # RIG_MODEL_NETRIGCTL: Hamlib's own client for a remote rigctld
++RIGCTLD_PORT = 4532
+ VFO = 1 << 29  # RIG_VFO_CURR in Hamlib 4.7
+ 
+ 
+@@ -58,15 +61,22 @@
      if path is not None:
          yield path
          return
@@ -260,7 +486,7 @@ diff -ruN -x var a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
  
  
  def load_library(path=None):
-@@ -108,8 +116,8 @@
+@@ -108,8 +118,8 @@
          'rig_cleanup':(ctypes.c_int,[ctypes.c_void_p]),
          'rig_open':(ctypes.c_int,[ctypes.c_void_p]),
          'rig_close':(ctypes.c_int,[ctypes.c_void_p]),
@@ -271,7 +497,7 @@ diff -ruN -x var a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
          'rig_get_freq':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_uint,ctypes.POINTER(ctypes.c_double)]),
          'rig_set_freq':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_uint,ctypes.c_double]),
          'rig_get_ptt':(ctypes.c_int,[ctypes.c_void_p,ctypes.c_uint,ctypes.POINTER(ctypes.c_int)]),
-@@ -134,6 +142,37 @@
+@@ -134,10 +144,60 @@
      return lib,directory
  
  
@@ -306,10 +532,64 @@ diff -ruN -x var a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
 +        return True
 +
 +
++def rigctld_endpoint(values):
++    """Return (host, port) when the radio settings select a rigctld TCP link, else None. Raises ValueError."""
++    if values.get('link') != 'rigctld':
++        return None
++    host = str(values.get('rigctld_host', '')).strip()
++    if not host or any(ch.isspace() or ch in '/\\' for ch in host):
++        raise ValueError(tr('rigctld.err_host'))
++    try:
++        port = int(values.get('rigctld_port', RIGCTLD_PORT))
++    except (TypeError, ValueError):
++        port = 0
++    if not 1 <= port <= 65535:
++        raise ValueError(tr('rigctld.err_port'))
++    return host, port
++
++
  class HamlibController(CIVController):
-     def __init__(self, model):
+-    def __init__(self, model):
++    def __init__(self, model, endpoint=None):
          if model not in HAMLIB_MODELS:raise ValueError(tr('ui.0e1b2eddb0064736'))
-@@ -153,6 +192,8 @@
+         super().__init__(0,model=model)
++        # endpoint=(host, port): talk to a running rigctld through Hamlib's NET rigctl backend.
++        # self.model still names the radio behind rigctld so model-specific controls keep working.
++        self.endpoint=endpoint
+         self.handle=None;self.lib=None;self.dll_directory=None
+ 
+     def _configure(self, name, value):
+@@ -145,14 +205,38 @@
+         if token<=0 or self.lib.rig_set_conf(self.handle,token,str(value).encode('ascii'))!=0:
+             raise RuntimeError(tr('ui.3b63f1d8c2e309c9').format(name=name))
+ 
++    def _connect_rigctld(self):
++        import socket
++        host,port=self.endpoint
++        target=f'{host}:{port}'
++        try:  # fail fast with a clear message instead of waiting inside libhamlib
++            socket.create_connection((host,port),timeout=3).close()
++        except OSError as exc:
++            raise RuntimeError(tr('rigctld.fail').format(target=target)+f' ({exc})') from None
++        self.lib,self.dll_directory=load_library()
++        self.handle=self.lib.rig_init(NETRIGCTL_MODEL)
++        if not self.handle:raise RuntimeError(tr('ui.7e5e540d968b10d3'))
++        self._configure('rig_pathname',target)
++        if self.lib.rig_open(self.handle)!=0:raise RuntimeError(tr('rigctld.fail').format(target=target))
++        freq=self.read_frequency()
++        if not freq:raise RuntimeError(tr('ui.a634f8b30c1ea3a3'))
++        self.status=CIVStatus(True,target,0,freq,'rigctld接続')
++
+     def connect(self,port='AUTO',baud='AUTO',timeout=8.0):
+         with self._lock:
+             self.disconnect();self.cancel.clear()
++            if self.endpoint:
++                try:self._connect_rigctld()
++                except Exception as exc:
++                    self.disconnect();self.status.message=str(exc)
++                return self.status
+             if str(port).upper()=='AUTO' or str(baud).upper()=='AUTO':
+                 self.status=CIVStatus(message=tr('ui.8a80fb6572bef5af'))
                  return self.status
              try:
                  self.lib,self.dll_directory=load_library()
@@ -318,9 +598,9 @@ diff -ruN -x var a/psrtty/hamlib_radio.py b/psrtty/hamlib_radio.py
                  self.handle=self.lib.rig_init(HAMLIB_MODELS[self.model][0])
                  if not self.handle:raise RuntimeError(tr('ui.7e5e540d968b10d3'))
                  self._configure('rig_pathname',port)
-diff -ruN -x var a/psrtty/i18n.py b/psrtty/i18n.py
---- a/psrtty/i18n.py	2026-10-14 08:38:26.612313312 +0000
-+++ b/psrtty/i18n.py	2026-10-14 08:38:26.671862796 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/i18n.py b/psrtty/i18n.py
+--- a/psrtty/i18n.py	2026-10-14 08:56:31.984738045 +0000
++++ b/psrtty/i18n.py	2026-10-14 08:56:32.732726759 +0000
 @@ -12,7 +12,7 @@
  from string import Formatter
  from .english_fallback import STRINGS as ENGLISH
@@ -339,9 +619,9 @@ diff -ruN -x var a/psrtty/i18n.py b/psrtty/i18n.py
          if path.exists() and path.stat().st_size>1024*1024:
              path.replace(path.with_suffix('.log.1'))
          with path.open('a',encoding='utf-8') as f:f.write(' | '.join(problem)+'\n')
-diff -ruN -x var a/psrtty/paths.py b/psrtty/paths.py
---- a/psrtty/paths.py	2026-10-14 08:38:26.612846476 +0000
-+++ b/psrtty/paths.py	2026-10-14 08:38:26.672708297 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/paths.py b/psrtty/paths.py
+--- a/psrtty/paths.py	2026-10-14 08:56:31.986235454 +0000
++++ b/psrtty/paths.py	2026-10-14 08:56:32.733544798 +0000
 @@ -1,5 +1,6 @@
  from __future__ import annotations
  
@@ -381,9 +661,37 @@ diff -ruN -x var a/psrtty/paths.py b/psrtty/paths.py
      paths = {
          "root": root,
          "config": root / "config",
-diff -ruN -x var a/psrtty/ui/about_dialog.py b/psrtty/ui/about_dialog.py
---- a/psrtty/ui/about_dialog.py	2026-10-14 08:38:26.613649009 +0000
-+++ b/psrtty/ui/about_dialog.py	2026-10-14 08:38:26.674351513 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/radio.py b/psrtty/radio.py
+--- a/psrtty/radio.py	2026-10-14 08:56:31.986512761 +0000
++++ b/psrtty/radio.py	2026-10-14 08:56:32.733769709 +0000
+@@ -3,7 +3,7 @@
+ from .civ import CIVController, radio_address, connect_configured
+ from .config import RIG_MODELS
+ from .yaesu import YAESU_MODELS, YaesuController
+-from .hamlib_radio import HAMLIB_MODELS, HamlibController
++from .hamlib_radio import HAMLIB_MODELS, HamlibController, rigctld_endpoint
+ 
+ 
+ def validate_radio(values):
+@@ -11,7 +11,7 @@
+     if model in HAMLIB_MODELS:
+         if values.get('ptt','CAT')!='CAT':
+             raise ValueError(tr('ui.4974a6628eaba1f2'))
+-        if str(values.get('com_port','AUTO')).upper()=='AUTO' or str(values.get('cat_baud','AUTO')).upper()=='AUTO':
++        if rigctld_endpoint(values) is None and (str(values.get('com_port','AUTO')).upper()=='AUTO' or str(values.get('cat_baud','AUTO')).upper()=='AUTO'):
+             raise ValueError(tr('ui.c3e19a59664aae88'))
+     elif model in YAESU_MODELS:
+         if values.get('ptt', 'CAT') != 'CAT':
+@@ -30,5 +30,5 @@
+ def create_controller(values):
+     validate_radio(values)
+     if values['model'] in HAMLIB_MODELS:
+-        return HamlibController(values['model'])
++        return HamlibController(values['model'], rigctld_endpoint(values))
+     return CIVController(radio_address(values), model=values['model'])
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/ui/about_dialog.py b/psrtty/ui/about_dialog.py
+--- a/psrtty/ui/about_dialog.py	2026-10-14 08:56:31.987894441 +0000
++++ b/psrtty/ui/about_dialog.py	2026-10-14 08:56:32.734751653 +0000
 @@ -7,6 +7,7 @@
  from PySide6.QtGui import QPixmap, QDesktopServices
  from PySide6.QtWidgets import QDialog, QLabel, QScrollArea, QVBoxLayout, QHBoxLayout, QFrame, QWidget, QPushButton
@@ -405,9 +713,9 @@ diff -ruN -x var a/psrtty/ui/about_dialog.py b/psrtty/ui/about_dialog.py
      try:
          value=version.read_text(encoding='ascii').strip()
          if not value or len(value)>30:return tr('ui.10166ff42a6f44b6')
-diff -ruN -x var a/psrtty/ui/cabrillo_dialog.py b/psrtty/ui/cabrillo_dialog.py
---- a/psrtty/ui/cabrillo_dialog.py	2026-10-14 08:38:26.613941004 +0000
-+++ b/psrtty/ui/cabrillo_dialog.py	2026-10-14 08:38:26.674457232 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/ui/cabrillo_dialog.py b/psrtty/ui/cabrillo_dialog.py
+--- a/psrtty/ui/cabrillo_dialog.py	2026-10-14 08:56:31.988616326 +0000
++++ b/psrtty/ui/cabrillo_dialog.py	2026-10-14 08:56:32.735252858 +0000
 @@ -12,7 +12,7 @@
  from PySide6.QtWidgets import (QDialog,QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QPushButton,
      QSizePolicy,QRadioButton,QButtonGroup,QStackedWidget,QLineEdit,QComboBox,QSpinBox,QDateTimeEdit,QTableWidget,
@@ -426,9 +734,9 @@ diff -ruN -x var a/psrtty/ui/cabrillo_dialog.py b/psrtty/ui/cabrillo_dialog.py
              folder.mkdir(parents=True,exist_ok=True)
              path=folder/f'cabrillo_{datetime.now():%Y%m%d}.log'
              with path.open('a',encoding='utf-8') as stream:
-diff -ruN -x var a/psrtty/ui/frequency_guide.py b/psrtty/ui/frequency_guide.py
---- a/psrtty/ui/frequency_guide.py	2026-10-14 08:38:26.614408522 +0000
-+++ b/psrtty/ui/frequency_guide.py	2026-10-14 08:38:26.674331905 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/ui/frequency_guide.py b/psrtty/ui/frequency_guide.py
+--- a/psrtty/ui/frequency_guide.py	2026-10-14 08:56:31.989733422 +0000
++++ b/psrtty/ui/frequency_guide.py	2026-10-14 08:56:32.734664391 +0000
 @@ -18,7 +18,7 @@
          layout.addWidget(self.tabs)
          style = STYLE
@@ -438,9 +746,9 @@ diff -ruN -x var a/psrtty/ui/frequency_guide.py b/psrtty/ui/frequency_guide.py
          for region in (None,) + REGIONS:
              browser = QTextBrowser()
              browser.setOpenExternalLinks(True)
-diff -ruN -x var a/psrtty/ui/guide.py b/psrtty/ui/guide.py
---- a/psrtty/ui/guide.py	2026-10-14 08:38:26.614459091 +0000
-+++ b/psrtty/ui/guide.py	2026-10-14 08:38:26.674306572 +0000
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/ui/guide.py b/psrtty/ui/guide.py
+--- a/psrtty/ui/guide.py	2026-10-14 08:56:31.989825160 +0000
++++ b/psrtty/ui/guide.py	2026-10-14 08:56:32.734602065 +0000
 @@ -7,7 +7,7 @@
  from PySide6.QtGui import QFont
  from PySide6.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QTextBrowser, QPushButton
@@ -459,9 +767,100 @@ diff -ruN -x var a/psrtty/ui/guide.py b/psrtty/ui/guide.py
              browser.document().setDefaultStyleSheet(style)
              browser.setHtml(body); self.tabs.addTab(browser,title)
          close=QPushButton(tr('ui.f6c244f98893cd95')); close.clicked.connect(self.hide); root.addWidget(close)
-diff -ruN -x var a/psrtty.desktop.in b/psrtty.desktop.in
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/ui/main_window.py b/psrtty/ui/main_window.py
+--- a/psrtty/ui/main_window.py	2026-10-14 08:56:31.991128563 +0000
++++ b/psrtty/ui/main_window.py	2026-10-14 08:56:32.736325871 +0000
+@@ -1902,7 +1902,7 @@
+             if port==port_key(radio.get('com_port')) or port==port_key(external.get('com_port')):
+                 return tr('ui.c94aa95809e63d94')
+         radio=self.store.data['radio']
+-        if radio.get('model') and str(radio.get('com_port','AUTO')).upper()=='AUTO':
++        if radio.get('model') and radio.get('link')!='rigctld' and str(radio.get('com_port','AUTO')).upper()=='AUTO':
+             return tr('ui.19328d36a95911a7')
+         if self.radio and port==port_key(getattr(self.radio.status,'port','')):
+             return tr('ui.c94aa95809e63d94')
+diff -ruN -x var -x config -x logdata -x lib a/psrtty/ui/settings_dialog.py b/psrtty/ui/settings_dialog.py
+--- a/psrtty/ui/settings_dialog.py	2026-10-14 08:56:31.991924466 +0000
++++ b/psrtty/ui/settings_dialog.py	2026-10-14 08:56:32.736924156 +0000
+@@ -18,7 +18,7 @@
+ from ..radio import create_controller, validate_radio
+ from ..external_ptt import ExternalPTT, validate_external
+ from ..yaesu import YAESU_MODELS
+-from ..hamlib_radio import HAMLIB_MODELS
++from ..hamlib_radio import HAMLIB_MODELS, RIGCTLD_PORT
+ from .background import BackgroundJob
+ from ..config import DEFAULT_CONFIG, RIG_MODELS, PROFILE_KEYS, profile_name
+ 
+@@ -288,7 +288,7 @@
+         self._update_profile_tab_colors()
+ 
+     def _build_radio_tab(self):
+-        tab = QWidget(); form = QFormLayout(tab)
++        tab = QWidget(); form = QFormLayout(tab); self.form_radio = form
+         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+         self.rig = QComboBox(); self.rig.addItem(tr('ui.0de0988dea1ae0b7'), '')
+         from ..radio_support import ICOM_EXTERNAL_AUDIO, ICOM_EXTERNAL_PTT
+@@ -310,6 +310,21 @@
+             self.com.addItem(f"{target}{tr('ui.fdaf3eaa9227aabe')}", target)
+         self._select_data(self.com, target)
+         form.addRow(tr('ui.6bf76187430ec90a'), self.com)
++        # Hamlib models only: control the radio through a running rigctld (TCP) instead of a local serial port.
++        saved_radio = self.working['radio']
++        self.link = QComboBox()
++        self.link.addItem(tr('rigctld.serial'), 'serial'); self.link.addItem(tr('rigctld.tcp'), 'rigctld')
++        self._select_data(self.link, saved_radio.get('link', 'serial'))
++        form.addRow(tr('rigctld.link'), self.link)
++        self.rc_host = QLineEdit(str(saved_radio.get('rigctld_host', '127.0.0.1')))
++        form.addRow(tr('rigctld.host'), self.rc_host)
++        self.rc_port = QSpinBox(); self.rc_port.setRange(1, 65535)
++        self.rc_port.setValue(int(saved_radio.get('rigctld_port', RIGCTLD_PORT)))
++        form.addRow(tr('rigctld.port'), self.rc_port)
++        self.link.currentIndexChanged.connect(self._link_changed)
++        for widget in (self.rc_host, ):
++            widget.textChanged.connect(self._test_controls_changed)
++        self.rc_port.valueChanged.connect(self._test_controls_changed)
+         self.port_note = QLabel(); self.port_note.setWordWrap(True); self.port_note.setObjectName('helpText')
+         form.addRow('', self.port_note)
+         self.specific = QGroupBox(tr('ui.e3dee3c5ad0acd89'))
+@@ -421,6 +436,23 @@
+         self.port_note.setStyleSheet("color:#075aa6;" if model in ICOM_EXTERNAL_PTT else "")
+         self.cat_note.setText(tr('ui.572e3f063948c095'))
+         self._mode_caption()
++        self._link_changed()
++
++    def _link_changed(self, *_):
++        """Show serial or rigctld(TCP) fields; rigctld applies to Hamlib models only."""
++        yaesu = (self.rig.currentData() or '') in HAMLIB_MODELS
++        tcp = yaesu and self.link.currentData() == 'rigctld'
++        self.form_radio.setRowVisible(self.link, yaesu)
++        self.form_radio.setRowVisible(self.rc_host, tcp)
++        self.form_radio.setRowVisible(self.rc_port, tcp)
++        self.form_radio.setRowVisible(self.com, not tcp)
++        for widget in (self.baud_label, self.baud): widget.setVisible(not tcp)
++        if tcp:
++            self.port_note.setText(tr('rigctld.note'))
++        elif yaesu:
++            self.port_note.setText(tr('ui.23dc07621ef4d739'))
++        if hasattr(self, 'verified_values') and hasattr(self, 'test_tx_button'):
++            self._test_controls_changed()
+ 
+     def _mode_caption(self, *_):
+         mode = self.data_mode.currentText() if hasattr(self, 'data_mode') else self.working['advanced'].get('data_mode', 'LSB-D')
+@@ -683,7 +715,10 @@
+                       com_port=self.com.currentData() or 'AUTO', ptt=self.ptt.currentData() or self.ptt.currentText(),
+                       auto_data_mode=self.auto_mode.isChecked())
+         values['cat_baud' if yaesu else 'civ_baud'] = self.baud.currentData() or 'AUTO'
+-        if yaesu: values['cat_stopbits'] = self.stopbits.currentData()
++        if yaesu:
++            values['cat_stopbits'] = self.stopbits.currentData()
++            values.update(link=self.link.currentData() or 'serial', rigctld_host=self.rc_host.text().strip(),
++                          rigctld_port=self.rc_port.value())
+         return values
+ 
+     def _test_controls_changed(self, *_):
+diff -ruN -x var -x config -x logdata -x lib a/psrtty.desktop.in b/psrtty.desktop.in
 --- a/psrtty.desktop.in	1970-01-01 00:00:00.000000000 +0000
-+++ b/psrtty.desktop.in	2026-10-14 08:38:26.637379810 +0000
++++ b/psrtty.desktop.in	2026-10-14 08:56:32.682800344 +0000
 @@ -0,0 +1,9 @@
 +[Desktop Entry]
 +Type=Application
@@ -472,26 +871,26 @@ diff -ruN -x var a/psrtty.desktop.in b/psrtty.desktop.in
 +Terminal=false
 +Categories=HamRadio;AudioVideo;
 +StartupWMClass=psrtty
-diff -ruN -x var a/psrtty.sh b/psrtty.sh
+diff -ruN -x var -x config -x logdata -x lib a/psrtty.sh b/psrtty.sh
 --- a/psrtty.sh	1970-01-01 00:00:00.000000000 +0000
-+++ b/psrtty.sh	2026-10-14 08:38:26.637173455 +0000
++++ b/psrtty.sh	2026-10-14 08:56:32.682341763 +0000
 @@ -0,0 +1,5 @@
 +#!/usr/bin/env bash
 +# PSRTTY 起動スクリプト（Linux）。install-linux.sh が作る .venv を使用する。
 +DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 +if [ -x "$DIR/.venv/bin/python" ]; then PY="$DIR/.venv/bin/python"; else PY="$(command -v python3)"; fi
 +exec "$PY" "$DIR/psrtty.py" "$@"
-diff -ruN -x var a/requirements-linux.txt b/requirements-linux.txt
+diff -ruN -x var -x config -x logdata -x lib a/requirements-linux.txt b/requirements-linux.txt
 --- a/requirements-linux.txt	1970-01-01 00:00:00.000000000 +0000
-+++ b/requirements-linux.txt	2026-10-14 08:38:26.636940253 +0000
++++ b/requirements-linux.txt	2026-10-14 08:56:32.681784785 +0000
 @@ -0,0 +1,4 @@
 +PySide6>=6.7,<7
 +numpy>=1.26,<3
 +sounddevice>=0.5.6,<1
 +pyserial>=3.5,<4
-diff -ruN -x var a/tests/test_hamlib_089.py b/tests/test_hamlib_089.py
---- a/tests/test_hamlib_089.py	2026-10-14 08:38:26.624330350 +0000
-+++ b/tests/test_hamlib_089.py	2026-10-14 08:38:26.680430010 +0000
+diff -ruN -x var -x config -x logdata -x lib a/tests/test_hamlib_089.py b/tests/test_hamlib_089.py
+--- a/tests/test_hamlib_089.py	2026-10-14 08:56:32.272690088 +0000
++++ b/tests/test_hamlib_089.py	2026-10-14 08:56:32.747659591 +0000
 @@ -1,3 +1,4 @@
 +from pathlib import Path
  import unittest
@@ -511,9 +910,9 @@ diff -ruN -x var a/tests/test_hamlib_089.py b/tests/test_hamlib_089.py
          self.assertIsNotNone(lib)
  
      def test_all_chosen_models_are_explicit(self):
-diff -ruN -x var a/tests/test_linux_port.py b/tests/test_linux_port.py
+diff -ruN -x var -x config -x logdata -x lib a/tests/test_linux_port.py b/tests/test_linux_port.py
 --- a/tests/test_linux_port.py	1970-01-01 00:00:00.000000000 +0000
-+++ b/tests/test_linux_port.py	2026-10-14 08:38:26.680211564 +0000
++++ b/tests/test_linux_port.py	2026-10-14 08:56:32.746847717 +0000
 @@ -0,0 +1,52 @@
 +import os
 +import tempfile
@@ -567,9 +966,112 @@ diff -ruN -x var a/tests/test_linux_port.py b/tests/test_linux_port.py
 +
 +if __name__ == '__main__':
 +    unittest.main()
-diff -ruN -x var a/tests/test_v111.py b/tests/test_v111.py
---- a/tests/test_v111.py	2026-10-14 08:38:26.626691513 +0000
-+++ b/tests/test_v111.py	2026-10-14 08:38:26.680148483 +0000
+diff -ruN -x var -x config -x logdata -x lib a/tests/test_rigctld_link.py b/tests/test_rigctld_link.py
+--- a/tests/test_rigctld_link.py	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/test_rigctld_link.py	2026-10-14 08:56:32.746786245 +0000
+@@ -0,0 +1,99 @@
++"""rigctld (TCP) link for Hamlib models: validation, settings dialog and a fake rigctld."""
++import os
++os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
++import copy
++import unittest
++from unittest.mock import Mock
++
++from PySide6.QtWidgets import QApplication
++
++from psrtty.alc_display import signature
++from psrtty.config import DEFAULT_CONFIG, DEFAULT_MACROS
++from psrtty.hamlib_radio import HamlibController, rigctld_endpoint
++from psrtty.radio import create_controller, validate_radio
++from psrtty.ui.settings_dialog import SettingsDialog
++from tests.dialog_guard import DialogGuard
++
++BASE = dict(model='FT-991 / FT-991A', ptt='CAT', com_port='AUTO', link='rigctld',
++            rigctld_host='127.0.0.1', rigctld_port=4532)
++
++
++class EndpointTests(unittest.TestCase):
++    def test_serial_link_has_no_endpoint(self):
++        self.assertIsNone(rigctld_endpoint(dict(BASE, link='serial')))
++        self.assertIsNone(rigctld_endpoint({}))
++
++    def test_endpoint(self):
++        self.assertEqual(rigctld_endpoint(BASE), ('127.0.0.1', 4532))
++        self.assertEqual(rigctld_endpoint(dict(BASE, rigctld_host=' rig.local ', rigctld_port='4540')), ('rig.local', 4540))
++
++    def test_invalid_values_rejected(self):
++        for bad in (dict(BASE, rigctld_host=''), dict(BASE, rigctld_host='a b'), dict(BASE, rigctld_port=0),
++                    dict(BASE, rigctld_port=65536), dict(BASE, rigctld_port='x')):
++            with self.assertRaises(ValueError):
++                validate_radio(bad)
++
++    def test_rigctld_does_not_need_com_port_or_speed(self):
++        validate_radio(BASE)  # com_port AUTO and no cat_baud is fine over TCP
++        with self.assertRaises(ValueError):
++            validate_radio(dict(BASE, link='serial'))  # serial still requires them
++
++    def test_factory_passes_endpoint(self):
++        self.assertEqual(create_controller(BASE).endpoint, ('127.0.0.1', 4532))
++        self.assertIsNone(create_controller(dict(BASE, link='serial', com_port='/dev/ttyUSB0', cat_baud='38400')).endpoint)
++
++    def test_unreachable_server_reports_clearly_without_loading_hamlib(self):
++        controller = HamlibController('FT-991 / FT-991A', ('127.0.0.1', 1))  # nothing listens on port 1
++        status = controller.connect()
++        self.assertFalse(status.connected)
++        self.assertIn('127.0.0.1:1', status.message)
++
++    def test_signature_changes_only_for_rigctld(self):
++        serial = dict(BASE, link='serial')
++        self.assertEqual(signature(serial, 'x'), signature({k: v for k, v in serial.items() if k != 'link'}, 'x'))
++        self.assertNotEqual(signature(BASE, 'x'), signature(dict(BASE, rigctld_port=4533), 'x'))
++
++
++class SettingsDialogTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.app = QApplication.instance() or QApplication([])
++
++    def setUp(self):
++        self.guard = DialogGuard(); self.guard.start(); self.addCleanup(self.guard.stop)
++        self.store = Mock(data=copy.deepcopy(DEFAULT_CONFIG), macros=copy.deepcopy(DEFAULT_MACROS))
++
++    def dialog(self, model):
++        dlg = SettingsDialog(self.store)
++        dlg._select_data(dlg.rig, model); dlg.show()
++        return dlg
++
++    def test_link_row_only_for_hamlib_models(self):
++        dlg = self.dialog('IC-705')
++        self.assertFalse(dlg.form_radio.isRowVisible(dlg.link))
++        dlg._select_data(dlg.rig, 'FT-991 / FT-991A')
++        self.assertTrue(dlg.form_radio.isRowVisible(dlg.link))
++        self.assertTrue(dlg.form_radio.isRowVisible(dlg.com))
++        self.assertFalse(dlg.form_radio.isRowVisible(dlg.rc_host))
++
++    def test_rigctld_fields_toggle_and_save(self):
++        dlg = self.dialog('FT-991 / FT-991A')
++        dlg._select_data(dlg.link, 'rigctld')
++        self.assertTrue(dlg.form_radio.isRowVisible(dlg.rc_host) and dlg.form_radio.isRowVisible(dlg.rc_port))
++        self.assertFalse(dlg.form_radio.isRowVisible(dlg.com)); self.assertFalse(dlg.baud.isVisible())
++        dlg.rc_host.setText('192.168.1.20'); dlg.rc_port.setValue(4540)
++        values = dlg._radio_values()
++        self.assertEqual((values['link'], values['rigctld_host'], values['rigctld_port']), ('rigctld', '192.168.1.20', 4540))
++        dlg._save()
++        saved = self.store.data['radio']
++        self.assertEqual((saved['link'], saved['rigctld_host'], saved['rigctld_port']), ('rigctld', '192.168.1.20', 4540))
++        again = SettingsDialog(self.store)
++        self.assertEqual((again.link.currentData(), again.rc_host.text(), again.rc_port.value()), ('rigctld', '192.168.1.20', 4540))
++
++    def test_icom_values_unchanged(self):
++        dlg = self.dialog('IC-705')
++        self.assertNotIn('link', dlg._radio_values())
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff -ruN -x var -x config -x logdata -x lib a/tests/test_v111.py b/tests/test_v111.py
+--- a/tests/test_v111.py	2026-10-14 08:56:32.277087794 +0000
++++ b/tests/test_v111.py	2026-10-14 08:56:32.746650138 +0000
 @@ -17,9 +17,10 @@
          self.catalog = self.root / 'language'
          shutil.copytree(ROOT / 'language', self.catalog)
@@ -582,9 +1084,9 @@ diff -ruN -x var a/tests/test_v111.py b/tests/test_v111.py
          i18n.configure('ja')
          self.tmp.cleanup()
      def test_complete_and_embedded_english_matches(self):
-diff -ruN -x var a/tests/test_v112.py b/tests/test_v112.py
---- a/tests/test_v112.py	2026-10-14 08:38:26.626750600 +0000
-+++ b/tests/test_v112.py	2026-10-14 08:38:26.680179439 +0000
+diff -ruN -x var -x config -x logdata -x lib a/tests/test_v112.py b/tests/test_v112.py
+--- a/tests/test_v112.py	2026-10-14 08:56:32.277510509 +0000
++++ b/tests/test_v112.py	2026-10-14 08:56:32.746725965 +0000
 @@ -23,9 +23,10 @@
          self.catalog = self.root / 'language'
          shutil.copytree(ROOT / 'language', self.catalog)
@@ -597,9 +1099,9 @@ diff -ruN -x var a/tests/test_v112.py b/tests/test_v112.py
          i18n.configure('ja')
          i18n.install_qt_translation()
          self.tmp.cleanup()
-diff -ruN -x var a/tests/test_v74.py b/tests/test_v74.py
---- a/tests/test_v74.py	2026-10-14 08:38:26.627688087 +0000
-+++ b/tests/test_v74.py	2026-10-14 08:38:26.681660404 +0000
+diff -ruN -x var -x config -x logdata -x lib a/tests/test_v74.py b/tests/test_v74.py
+--- a/tests/test_v74.py	2026-10-14 08:56:32.279470211 +0000
++++ b/tests/test_v74.py	2026-10-14 08:56:32.751528218 +0000
 @@ -55,7 +55,7 @@
  
      def test_startup_failure_never_constructs_mainwindow(self):

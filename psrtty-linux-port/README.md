@@ -1,8 +1,10 @@
 # PSRTTY 1.15 Linux移植版（非公式）
 
+追加機能(1.1): **Hamlib rigctld へのTCP接続**（下記「rigctld接続」）。
+
 - 基礎: PSRTTY（H.Tanaka / JH1HST、AKIHABARA-GIKEN）配布アーカイブ `PSRTTY-1.16.tar.gz`（内部 `__version__` は 1.15）
 - 対象OS: Ubuntu 26.04 LTS（Ubuntu 24.04 LTS 上で動作確認）、x86_64 / aarch64
-- 名称: **PSRTTY 1.15 Linux port 1.0**（作者公式版・作者保証版ではありません）
+- 名称: **PSRTTY 1.15 Linux port 1.1**（作者公式版・作者保証版ではありません）
 - 元ソースの `docs/DISTRIBUTION_TERMS.txt` に従い、改変点は本書の「変更点」、元の著作権表示は保持しています。
   配布する場合は、作者への事前通知と、改良版ソース全体・ビルド用スクリプトの提供が必要です。
 
@@ -20,6 +22,24 @@ sudo usermod -aG dialout $USER         # CAT/外部PTTのシリアルに必須�
 
 `--no-apt` で apt を省略。Hamlib 5 が既にシステムにある（`ldconfig -p | grep libhamlib.so.5`）なら `--hamlib` は不要です。
 
+## rigctld接続（TCP）
+
+設定画面「無線機」タブで Yaesu/Kenwood（Hamlib機種）を選ぶと **接続方式** が現れます。
+
+| 項目 | 内容 |
+|---|---|
+| 接続方式 | `シリアル（直接）`（従来）／`rigctld（TCP）` |
+| rigctldホスト | 既定 `127.0.0.1`（他PC・VMのrigctldも可） |
+| rigctldポート | 既定 `4532`（1～65535） |
+
+- 機種は **rigctld側につないだ無線機** に合わせて選びます（フィルター幅・データモード等の機種別制御に使用）。COMポートとCAT速度は不要です。
+- 例: `rigctld -m 1035 -r /dev/ttyUSB0 -s 38400` を起動 → PSRTTYで `FT-991/A`・`rigctld（TCP）`・`127.0.0.1:4532`
+- 実装: Hamlib の NET rigctl バックエンド（`RIG_MODEL_NETRIGCTL`=2）を動的リンクした libhamlib 経由で使用します。接続前に3秒のTCP疎通確認を行い、失敗時は接続先付きのエラーを表示します。周波数・PTT・モード・NB/NR・フィルター・ALC/SWR/PWRは従来のHamlib機種と同じ経路です。
+- 設定保存: `radio.link` (`serial`/`rigctld`)、`radio.rigctld_host`、`radio.rigctld_port`。プロファイルごとに保存され、ALC較正の識別にも含まれます（シリアル利用者の既存較正は影響なし）。
+- 8言語（ja/en/ru/zh/ko/id/th/es）の文言を追加（`rigctld.*`）。ロシア語以下6言語の訳は機械的な短文で、ネイティブ確認はしていません。
+- 注意: rigctld は認証も暗号化も持ちません。信頼できるネットワーク内でのみ使用してください。
+- 検証: Hamlib 5.0.0~git の `rigctld -m 1`（ダミー無線機）に実接続し、接続・周波数設定/取得・PTT ON/OFF・モード設定、接続拒否時のエラー表示を確認。実機は未検証。
+
 ## 変更点（Windows依存の除去）
 
 | 箇所 | 内容 |
@@ -31,6 +51,7 @@ sudo usermod -aG dialout $USER         # CAT/外部PTTのシリアルに必須�
 | `psrtty/ui/about_dialog.py` | Linuxでは実際にロードされたlibhamlibの版（`rig_version()`）を表示 |
 | `psrtty/civ.py` | `/dev/ttyUSB*` 等に権限がない場合、候補表示と接続失敗に `dialout` の案内を追加 |
 | `psrtty/ui/guide.py`, `frequency_guide.py` | 日本語フォントに `Noto Sans CJK JP` を追加（Yu Gothic UIが無い環境） |
+| `psrtty/hamlib_radio.py` `radio.py` `alc_display.py` `ui/settings_dialog.py` `ui/main_window.py` `language/*.json` `english_fallback.py` | rigctld（TCP）接続（上記） |
 | 新規 | `install-linux.sh` `build-hamlib-linux.sh` `psrtty.sh` `psrtty.desktop.in` `requirements-linux.txt` |
 
 既に移植済みだった部分（変更不要）: PortAudio経由の音声（Windows固有のWASAPI処理は `sys.platform` 分岐済み）、
@@ -65,7 +86,7 @@ Hamlib 5.0.0~git（上流master）をビルドし `LD_LIBRARY_PATH` で動的ロ
 
 元ソースの `python -m unittest discover`（643件, `QT_QPA_PLATFORM=offscreen`）: 642件成功。
 失敗1件 `test_connect_failure_ui_keeps_ticking` はタイマー回数に依存する時間依存テスト（移植前の元ソースでも同じ結果）。
-移植後（テスト6件追加・既存テスト4件を保存先変更/Hamlib探索順に合わせ修正）: 649件中648件成功、失敗は上記の同じ時間依存テスト1件のみ。
+移植後（rigctld対応込み、テスト16件追加）: 659件中657件成功。失敗は時間依存の上記1件と、offscreen環境でマウスカーソル形状を見るテスト1件（`test_v60`、単独では3/3成功）。
 
 ## このディレクトリについて
 
