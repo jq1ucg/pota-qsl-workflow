@@ -125,3 +125,35 @@ GPIO19/20 は USB ホスト専用にするので、ログ/書き込みは UART �
 - FTX-1 に FH-2 用 REMOTE 端子があるかは不明。本機は FH-2 の抵抗値を自前で読むので不要。
 - FH-2 のプラグ径 (3.5mm 2 極) は取扱説明書の記述。実物で確認すること。
 - クローン回路にある SW13 + 22nF の用途は不明 (本機では使わない)。
+
+## 6. 決定事項ログ (作業メモ)
+
+### 採用ボード
+- **Freenove ESP32-S3 WROOM Board** (ESP32-S3-WROOM-1, 16MB flash / 8MB PSRAM, USB-C x2) を採用予定。
+  ピン配置は公式リポジトリ <https://github.com/Freenove/Freenove_ESP32_S3_WROOM_Board>
+  (`ESP32S3_Pinout.png`, Espressif データシート) で確認済み。
+- 使用ピン: GPIO4 (ADC1_CH3, FH-2) / GPIO6, 7 (LED) / GPIO19 (USB_D-) / GPIO20 (USB_D+) / 5V / 3V3 / GND。
+  いずれもヘッダに出ており、ストラッピング・PSRAM ピンと衝突しない。
+- **注意**: Freenove の `ESP32S3_Pinout.png` は USB_D-/D+ を **逆に表記**している (GPIO20=D-, GPIO19=D+)。
+  正しくは **GPIO19=USB_D-, GPIO20=USB_D+** (Espressif データシートと Freenove チュートリアルに一致)。
+- 基板上 WS2812 は GPIO48。外付け LED の代わりに使える。
+- 不採用: ESP32-DevKitC-32E (初代 ESP32: USB ホスト不可)、LILYGO T-Display-S3
+  (USB-C 1 つのみ・GPIO19/20 未引出し・GPIO4 がバッテリー ADC)。
+
+### 前提・方針
+- 電源は別バッテリー (モバイルバッテリー → UART 側 USB-C)。FTX-1 USB-C の VBUS は未確認のため、
+  ESP32 の 5V を USB-A メス経由で VBUS に供給する設計。
+- ホスト接続は OTG 側 USB-C を使わず、ヘッダの GPIO19/20 から USB-A メス + A-C ケーブルで FTX-1 へ。
+- マスター資料: `FTX-1_CAT_OM_JPN_2512-D.pdf` (KY / PB / USB 仮想 COM: CAT-1=Enhanced 38400bps) と
+  FH-2 リモート回路表 (KEY1-12: 866/1330/1820/2490/3240/4120/5360/6810/8870/12000/16900/25550 Ω,
+  無線機側は 5V + 4.7kΩ プルアップ, 3.5mm 2 極プラグ)。
+
+### 未解決 (実機で確認)
+- 本文 4 章の ★ 項目 (VBUS 電圧、CP2105 のインターフェース番号と vcp ライブラリ対応、
+  再生が自動で送信になるか)。FH-2 の P/B と DOWN は資料間で食い違うが未使用キーなので影響なし。
+- スケッチはコンパイル・実機とも未検証。
+
+### 次の一手
+1. ボード等の購入 (README 2 章の部品表)。
+2. ESP-IDF 環境でビルドを通す。
+3. 4 章の検証手順を順に実施。
