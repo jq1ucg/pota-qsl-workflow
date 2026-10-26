@@ -66,3 +66,9 @@ Update this file as structure, dependencies, and conventions solidify.
 ## Repository
 - GitHub: https://github.com/jq1ucg/pota-qsl-workflow
 - Owner: jq1ucg
+
+## ftx1-remote/ (hardware side project)
+ESP32-S3 (ESP-IDF, C) firmware + wiring design for a FH-2-style remote that
+plays FTX-1 CW message / voice memory via CAT over USB (`KY`/`PB`). Not part of
+the QSL pipeline above. Design and unverified-items checklist are in
+`ftx1-remote/README.md`; the code has not been compiled or run on hardware yet.
