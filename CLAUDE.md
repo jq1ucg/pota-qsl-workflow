@@ -62,6 +62,12 @@ Update this file as structure, dependencies, and conventions solidify.
     `pivot_qso_for_glabels.py -c` by label count / QSO count.
 11. **`find_non_ja_calls.py`** — Utility to find generated filenames whose
     callsign doesn't match a JA amateur radio prefix pattern.
+12. **`smarthamlog_lotw_upload.py`** — Takes **Smart HAMLOG** ADIF exports
+    (park ref in `MY_SIG_INFO`, malformed `FREQ` like `7.005.5`, D-STAR as
+    `DIGITALVOICE`+`DSTAR`), normalizes them for LoTW (reuses
+    `polo-lotw-fill.py` for `MY_STATE`/`MY_CNTY`/JCC), splits by
+    `STATION_CALLSIGN`, and signs/uploads via the **TQSL CLI**. Dry-run by
+    default; `--sign-only` makes `.tq8`, `--upload` uploads.
 
 ## Repository
 - GitHub: https://github.com/jq1ucg/pota-qsl-workflow
