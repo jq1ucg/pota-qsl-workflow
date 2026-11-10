@@ -67,7 +67,7 @@ Update this file as structure, dependencies, and conventions solidify.
     splits by `STATION_CALLSIGN`, and signs/uploads via the **TQSL CLI**.
     Dry-run by default; `--sign-only` makes `.tq8`, `--upload` uploads.
     See "LoTW / TQSL knowledge" below before changing it.
-    User guide (Japanese): `README-smarthamlog-lotw.md`.
+    User guide (Japanese): `README-smarthamlog-lotw.md` (HTML版: `README-smarthamlog-lotw.html`).
 
 ## LoTW / TQSL knowledge (learned in practice, TQSL 2.8.6)
 

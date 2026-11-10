@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LoTW 送信ガイド</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+/* Layout: 左に目次、右に本文の技術ガイド。狭い画面では目次が上に積まれる。 */
+:root {
+  --bg: #f4f7f9;
+  --surface: #ffffff;
+  --fg: #13222d;
+  --muted: #55697a;
+  --line: #d5dee5;
+  --accent: #0a6c8c;
+  --accent-soft: #e0f0f6;
+  --warn: #9a4a06;
+  --warn-soft: #fdf0e0;
+  --ok: #17703a;
+  --ok-soft: #e3f4e9;
+  --code-bg: #0f1d27;
+  --code-fg: #d9edf5;
+  --font-body: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1820; --surface: #14232d; --fg: #e3eef4; --muted: #94aab8; --line: #27394555;
+    --accent: #5cc3e2; --accent-soft: #123343; --warn: #f0a85a; --warn-soft: #33250f;
+    --ok: #62d28a; --ok-soft: #12301e; --code-bg: #091219; --code-fg: #d9edf5;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1820; --surface: #14232d; --fg: #e3eef4; --muted: #94aab8; --line: #27394555;
+  --accent: #5cc3e2; --accent-soft: #123343; --warn: #f0a85a; --warn-soft: #33250f;
+  --ok: #62d28a; --ok-soft: #12301e; --code-bg: #091219; --code-fg: #d9edf5;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  line-height: 1.75; font-size: 15px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 40px; }
+@media (max-width: 800px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+
+header.top { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.kicker { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { margin: 0; font-size: clamp(26px, 4.5vw, 38px); line-height: 1.25; text-wrap: balance; font-weight: 700; }
+.lead { margin: 0; max-width: 62ch; color: var(--muted); }
+.lead code, td code, li code, p code { font-family: var(--font-mono); font-size: .9em; background: var(--accent-soft); color: var(--accent); padding: 1px 6px; border-radius: 4px; word-break: break-all; }
+
+nav.toc { position: sticky; top: 16px; align-self: start; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+@media (max-width: 800px) { nav.toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px 14px; } }
+nav.toc a { color: var(--muted); text-decoration: none; padding: 3px 0; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); outline: none; text-decoration: underline; }
+
+main { min-width: 0; display: flex; flex-direction: column; gap: 44px; }
+section { min-width: 0; scroll-margin-top: 16px; }
+h2 { margin: 0 0 14px; font-size: 22px; line-height: 1.35; text-wrap: balance; }
+h3 { margin: 24px 0 8px; font-size: 16px; }
+p { margin: 0 0 12px; }
+ul { margin: 0 0 12px; padding-left: 1.3em; }
+li { margin-bottom: 4px; }
+
+.flow { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; padding: 0; list-style: none; counter-reset: s; }
+.flow li { flex: 1 1 200px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 0; counter-increment: s; }
+.flow li::before { content: counter(s); display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--bg); font: 500 12px var(--font-mono); margin-right: 8px; }
+
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 12px 0; }
+.mode { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+.mode.send { border-color: var(--accent); }
+.mode b { display: block; font-family: var(--font-mono); font-size: 13px; color: var(--accent); margin-bottom: 4px; }
+.mode span { color: var(--muted); font-size: 14px; }
+
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; }
+.note.ok { border-color: var(--ok); background: var(--ok-soft); }
+.note b:first-child { display: block; margin-bottom: 2px; }
+
+.code { position: relative; margin: 10px 0 16px; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-fg); border-radius: 8px; padding: 14px 70px 14px 16px; overflow-x: auto; font: 400 13px/1.65 var(--font-mono); white-space: pre; }
+.code button { position: absolute; top: 8px; right: 8px; font: 500 12px var(--font-mono); background: transparent; color: var(--code-fg); border: 1px solid #ffffff44; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.code button:hover { background: #ffffff1a; }
+.code button:focus-visible, nav.toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.code .cap { font: 500 12px var(--font-mono); color: var(--muted); margin-bottom: 4px; }
+
+.tablewrap { overflow-x: auto; margin: 10px 0 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12px; letter-spacing: .04em; color: var(--muted); background: var(--bg); white-space: nowrap; }
+td:first-child { min-width: 170px; }
+.t-ok { color: var(--ok); font-weight: 700; }
+.t-bad { color: var(--warn); font-weight: 700; }
+
+footer { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 16px; color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: no-preference) { .code button { transition: background .15s; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <span class="kicker">smarthamlog_lotw_upload.py v1.7.0</span>
+    <h1>Smart HAMLOG の ADIF を LoTW へ送る</h1>
+    <p class="lead">Smart HAMLOG が出力した ADIF を整形し、TQSL の CLI で署名して LoTW へアップロードします。POTA 運用(JA)の QSO を、運用エリア(<code>/0</code> <code>/1</code> …)ごとに送る用途を想定しています。</p>
+  </header>
+
+  <nav class="toc" aria-label="目次">
+    <a href="#need">必要なもの</a>
+    <a href="#flow">基本の流れ</a>
+    <a href="#modes">動作モード</a>
+    <a href="#recipes">使い方の例</a>
+    <a href="#options">オプション一覧</a>
+    <a href="#auto">自動で行う整形</a>
+    <a href="#csv">POTA-REF.csv</a>
+    <a href="#out">出力と終了コード</a>
+    <a href="#trouble">トラブル対処</a>
+    <a href="#limits">既知の制限</a>
+  </nav>
+
+  <main>
+    <section id="need">
+      <h2>必要なもの</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>項目</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>Python</td><td>Python 3。標準ライブラリのみで動き、追加インストールは不要です。</td></tr>
+          <tr><td>TQSL</td><td>インストール済みで、証明書(<code>JQ1UCG/0</code> など)と Station Location を登録してあること。</td></tr>
+          <tr><td><code>polo-lotw-fill.py</code></td><td>本スクリプトと<b>同じフォルダ</b>に置きます(関数を読み込んで使います)。</td></tr>
+          <tr><td><code>POTA-REF.csv</code></td><td>公園 REF から県・市郡区・JCC を引く対応表。<code>-p</code> で指定します。</td></tr>
+          <tr><td>Station Location</td><td>既定では <code>STATION_CALLSIGN</code> の末尾 <code>/n</code> から <code>POTA-nAREA</code> を使います(<code>JQ1UCG/0</code> → <code>POTA-0AREA</code>)。</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="flow">
+      <h2>基本の流れ</h2>
+      <div class="code"><pre>python3 smarthamlog_lotw_upload.py -p POTA-REF.csv ./adif-in/*.adi -o output --upload</pre><button type="button" data-copy>コピー</button></div>
+      <ol class="flow">
+        <li>Smart HAMLOG の ADIF(複数可)を読み込み、整形する</li>
+        <li><code>STATION_CALLSIGN</code> ごとに <code>output/…-JQ1UCG-0_lotw.adif</code> のように書き出す</li>
+        <li>TQSL で署名し、LoTW へアップロードする</li>
+      </ol>
+      <p><b>何も付けずに実行すると、整形とファイル出力だけを行い、送信しません</b>(dry-run)。実行予定の TQSL コマンドが表示されるので、確認してから <code>--upload</code> を付けてください。</p>
+    </section>
+
+    <section id="modes">
+      <h2>動作モード</h2>
+      <div class="modes">
+        <div class="mode"><b>(指定なし)</b><span>整形・出力のみ。TQSL コマンドを表示します(dry-run)。</span></div>
+        <div class="mode"><b>--sign-only</b><span>TQSL で署名して <code>.tq8</code> を作るだけ。送信はしません。</span></div>
+        <div class="mode send"><b>--upload</b><span>TQSL で署名して LoTW へアップロードします。</span></div>
+      </div>
+      <div class="note">
+        <b>署名だけでも「署名済み」になります</b>
+        <code>--sign-only</code> で署名したQSOは、TQSL が署名済みとして記録します。その後の <code>--upload</code> は「アップロードすべきQSOがない(終了コード8)」になります。初回から送るなら <code>--sign-only</code> を挟まず <code>--upload</code> を直接使ってください。署名だけ試した後で送るときは <code>--action all</code> を付けます。
+      </div>
+    </section>
+
+    <section id="recipes">
+      <h2>使い方の例</h2>
+      <h3>内容を確認する(送信しない)</h3>
+      <div class="code"><pre>python3 smarthamlog_lotw_upload.py -p POTA-REF.csv ./adif-in/*.adi -o output</pre><button type="button" data-copy>コピー</button></div>
+      <p><code>output/</code> の <code>*_lotw.adif</code> を開き、<code>MY_STATE</code> と <code>MY_CNTY</code> を確認します。</p>
+
+      <h3>送信する</h3>
+      <div class="code"><pre>python3 smarthamlog_lotw_upload.py -p POTA-REF.csv ./adif-in/*.adi -o output --upload</pre><button type="button" data-copy>コピー</button></div>
+
+      <h3>署名済みのQSOを含めて再送する</h3>
+      <div class="code"><pre>python3 smarthamlog_lotw_upload.py -p POTA-REF.csv ./adif-in/*.adi -o output --upload --action all</pre><button type="button" data-copy>コピー</button></div>
+      <p>LoTW 側で重複は無視されます。</p>
+
+      <h3>証明書にパスワードがある場合</h3>
+      <div class="code"><pre>TQSL_PASS='パスワード' python3 smarthamlog_lotw_upload.py -p POTA-REF.csv ./adif-in/*.adi -o output --upload --password-env TQSL_PASS</pre><button type="button" data-copy>コピー</button></div>
+      <p>パスワードはコマンドラインに直接書かず、環境変数で渡します。</p>
+
+      <h3>日付で絞る</h3>
+      <div class="code"><pre>python3 smarthamlog_lotw_upload.py -p POTA-REF.csv ./adif-in/*.adi -o output --upload --start-date 20261107 --end-date 20261109</pre><button type="button" data-copy>コピー</button></div>
+    </section>
+
+    <section id="options">
+      <h2>オプション一覧</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>オプション</th><th>説明</th><th>既定</th></tr></thead>
+        <tbody>
+          <tr><td><code>-p, --potatable PATH</code></td><td><code>POTA-REF.csv</code>。指定すると <code>MY_STATE</code> / <code>MY_CNTY</code> などを付与します。</td><td>なし</td></tr>
+          <tr><td><code>-o, --output-dir DIR</code></td><td>整形後 ADIF・<code>.tq8</code>・ログの出力先。</td><td><code>output</code></td></tr>
+          <tr><td><code>--upload</code> / <code>--sign-only</code></td><td>動作モード(上記)。</td><td>dry-run</td></tr>
+          <tr><td><code>--action all|compliant|abort</code></td><td>TQSL の重複・期間外QSOの扱い(<code>-a</code> に渡す)。</td><td><code>compliant</code></td></tr>
+          <tr><td><code>--tqsl PATH</code></td><td>TQSL 実行ファイルのパス。</td><td>PATH から探索</td></tr>
+          <tr><td><code>--location STATION=名前</code></td><td>Station Location 名を個別指定(複数可)。</td><td>自動</td></tr>
+          <tr><td><code>--location-template T</code></td><td>名前のテンプレート。<code>{station}</code> <code>{safe}</code> <code>{area}</code> が使えます。</td><td><code>POTA-{area}AREA</code></td></tr>
+          <tr><td><code>--password-env VAR</code></td><td>証明書パスワードを読む環境変数名。</td><td>なし</td></tr>
+          <tr><td><code>--cnty-format plain|state</code></td><td><code>MY_CNTY</code> の形式。<code>plain</code> は <code>0908</code>、<code>state</code> は <code>09,0908</code>。</td><td><code>plain</code></td></tr>
+          <tr><td><code>--location-mismatch update|report|ignore|none</code></td><td>ADIF の局所在地と Station Location が食い違うときの扱い(<code>-f</code> に渡す)。</td><td><code>update</code></td></tr>
+          <tr><td><code>--tqsl-config PATH</code></td><td>TQSL の <code>config.xml</code>。県・市郡区の事前チェックに使います(<code>none</code> で無効)。</td><td>自動探索</td></tr>
+          <tr><td><code>--dv-mode keep|dstar|fm</code></td><td>D-STAR の扱い。</td><td><code>keep</code></td></tr>
+          <tr><td><code>-c, --choice SPEC</code></td><td>複数県にまたがる公園の選択行(例: <code>JP-0209:2</code>)。</td><td>なし</td></tr>
+          <tr><td><code>--dedupe</code></td><td>同一QSOを重複除去(局+相手+日時分+BAND+MODE+SUBMODE)。</td><td>無効</td></tr>
+          <tr><td><code>--start-date</code> / <code>--end-date</code></td><td>日付で絞る(YYYYMMDD)。TQSL にも渡します。</td><td>なし</td></tr>
+          <tr><td><code>--overwrite</code></td><td>既存の <code>MY_STATE</code> / <code>MY_CNTY</code> なども上書き。</td><td>無効</td></tr>
+          <tr><td><code>--tqsl-extra "ARGS"</code></td><td>TQSL に追加で渡す引数。</td><td>なし</td></tr>
+          <tr><td><code>--timeout SEC</code></td><td>TQSL 1回あたりのタイムアウト。</td><td>300</td></tr>
+        </tbody>
+      </table></div>
+      <p>詳細は <code>python3 smarthamlog_lotw_upload.py --help</code> を参照してください。</p>
+    </section>
+
+    <section id="auto">
+      <h2>自動で行う整形</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>症状</th><th>対処</th></tr></thead>
+        <tbody>
+          <tr><td>公園番号が <code>MY_SIG_INFO</code>(<code>MY_SIG=POTA</code>)に入っている</td><td><code>MY_POTA_REF</code> を補完します。</td></tr>
+          <tr><td><code>MY_STATE</code> / <code>MY_CNTY</code> が無い</td><td><code>POTA-REF.csv</code> と突合して付与します(<code>09</code> と <code>0908</code>)。</td></tr>
+          <tr><td><code>FREQ</code> が不正(例: <code>7.005.5</code>)</td><td><code>7.0055</code> に修正します。直せない値や <code>BAND</code> と矛盾する値は削除します。</td></tr>
+          <tr><td>同じ公園が複数エリアに登録されている(例: JP-0012)</td><td><code>/n</code> サフィックスと CSV のエリア列で行を選びます。</td></tr>
+          <tr><td>QSO の順序がばらばら</td><td><code>QSO_DATE</code> → <code>TIME_ON</code> 順に並べます。</td></tr>
+          <tr><td><code>STATION_CALLSIGN</code> が複数ある</td><td>局ごとにファイルを分け、別々に署名・送信します。</td></tr>
+          <tr><td>相手局の <code>SIG</code> / <code>SIG_INFO</code>(P2P)</td><td>そのまま残します(LoTW 側では無視されます)。</td></tr>
+        </tbody>
+      </table></div>
+      <p>時刻は UTC として扱います(Smart HAMLOG の出力が UTC のため)。</p>
+    </section>
+
+    <section id="csv">
+      <h2>POTA-REF.csv の書き方</h2>
+      <div class="code"><div class="cap">POTA-REF.csv</div><pre>JARLエリア番号,公園REF番号,JP都道府県名,都道府県名+市区/郡名,JCC/JCG/AJA
+0,JP-0012,JP-NN(長野県),長野県小諸市,JCC0908
+1,JP-0012,JP-GM(群馬県),群馬県安中市,JCC1611</pre><button type="button" data-copy>コピー</button></div>
+      <ul>
+        <li><b>エリア列</b>は、運用した場所の JARL エリア(<code>/0</code>、<code>/1</code> など)です。同じ公園でもエリアが違えば別の行にします。</li>
+        <li>JCC の数字部分から、<code>MY_STATE</code>(先頭2桁)と <code>MY_CNTY</code>(数字全体)が決まります。</li>
+        <li>JCG 末尾の英字(例: <code>09015C</code>)は載せません。TQSL の選択肢に無いためです。</li>
+        <li>新しい公園は <code>build_pota_ref_csv.py</code> で追加できます。自動の値が実際の運用地と違う場合は、手で直してください。</li>
+      </ul>
+    </section>
+
+    <section id="out">
+      <h2>出力ファイルと終了コード</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>ファイル</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td><code>YYYYMMDD-JQ1UCG-0_lotw.adif</code></td><td>整形後の ADIF(局ごと)。</td></tr>
+          <tr><td><code>YYYYMMDD-JQ1UCG-0_lotw.tq8</code></td><td>署名済みファイル(<code>--sign-only</code> のとき)。</td></tr>
+          <tr><td><code>YYYYMMDD-JQ1UCG-0_lotw.tqsl.log</code></td><td>TQSL の実行ログ(コマンド、終了コード、出力)。</td></tr>
+        </tbody>
+      </table></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>終了コード</th><th>意味</th></tr></thead>
+        <tbody>
+          <tr><td><span class="t-ok">0</span></td><td>正常</td></tr>
+          <tr><td>1</td><td>入力・整形エラー</td></tr>
+          <tr><td><span class="t-bad">2</span></td><td>TQSL の実行エラー(アップロード失敗を含む)</td></tr>
+          <tr><td><span class="t-bad">3</span></td><td>TQSL が署名対象QSOを0件と判断(重複または期間外。TQSL の終了コードは 8)</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="trouble">
+      <h2>トラブル対処</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>症状</th><th>原因と対処</th></tr></thead>
+        <tbody>
+          <tr><td>署名対象QSOが0件(終了コード3)</td><td>重複(署名済み)か期間外です。画面に出る TQSL の出力を確認します。重複なら <code>--action all</code> を付けます。期間外なら、TQSL で証明書の QSO 開始/終了日を確認します。</td></tr>
+          <tr><td>「局の所在地は QSO データの詳細と一致していない」</td><td><code>--location-mismatch update</code>(既定)で解消します。古い TQSL で <code>-f</code> が使えない場合は <code>none</code> にして、公園ごとに Station Location を用意します。</td></tr>
+          <tr><td>「'US County State' の値として '09' ... 正しくありません」</td><td><code>MY_CNTY</code> が <code>09,0908</code> の形式になっています。<code>--cnty-format plain</code>(既定)を使います。</td></tr>
+          <tr><td>「TQSLの選択肢に無い市郡区」の警告</td><td><code>POTA-REF.csv</code> の JCC が TQSL の選択肢にありません。TQSL の <code>config.xml</code> で値を確認して CSV を直します。</td></tr>
+          <tr><td>公園REF未突合の警告</td><td><code>POTA-REF.csv</code> に公園がありません。<code>build_pota_ref_csv.py</code> で追加します。</td></tr>
+          <tr><td>複数県にまたがる公園の警告</td><td><code>-c JP-0209:2</code> のように、CSV 内で何番目の行かを指定します。</td></tr>
+          <tr><td>TQSL が見つからない</td><td><code>--tqsl /usr/local/bin/tqsl</code> のようにパスを指定します(Windows は <code>tqsl.exe</code>)。</td></tr>
+          <tr><td>D-STAR が受理されない</td><td>TQSL の設定データを更新します。それでも通らなければ <code>--dv-mode dstar</code>(または <code>fm</code>)を試します。</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note ok">
+        <b>実機での確認結果</b>
+        TQSL 2.8.6(Linux)で、329QSO(<code>JQ1UCG/0</code> が 247件、<code>/1</code> が 82件)の署名とアップロードが終了コード 0 で完了しています。
+      </div>
+    </section>
+
+    <section id="limits">
+      <h2>既知の制限・未確認事項</h2>
+      <ul>
+        <li>LoTW 上で D-STAR がどのモード区分(PHONE / DATA)に分類されるかは未確認です。</li>
+        <li>動作確認は TQSL 2.8.6 で行いました。他のバージョンでは <code>-f</code> や <code>-a</code> の挙動が違う可能性があります。</li>
+        <li>既存の <code>polo-lotw-fill.py</code> は、今も <code>MY_CNTY</code> を <code>09,0908</code>(カンマ付き)で出力します。TQSL 2.8.6 ではこの形式がエラーになるため、その出力を TQSL へ直接渡す場合は再確認してください。</li>
+        <li>署名とアップロードの結果は TQSL 側のログが正です。エラー時は <code>*.tqsl.log</code> を確認してください。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>リポジトリ: jq1ucg/pota-qsl-workflow ・ 対象スクリプト: smarthamlog_lotw_upload.py v1.7.0</footer>
+</div>
+
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var pre = btn.parentElement.querySelector('pre');
+    var text = pre.textContent;
+    function done(ok) {
+      btn.textContent = ok ? 'コピーしました' : '選択してコピー';
+      setTimeout(function () { btn.textContent = 'コピー'; }, 1600);
+    }
+    function fallback() {
+      var r = document.createRange(); r.selectNodeContents(pre);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      done(false);
+    }
+    try {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, fallback);
+    } catch (e) { fallback(); }
+  });
+});
+</script>
+
+</body>
+</html>
