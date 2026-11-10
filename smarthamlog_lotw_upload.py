@@ -69,8 +69,9 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   --tqsl PATH             TQSL実行ファイル (default: PATHから tqsl を探索)
   --location SPEC         STATION_CALLSIGN=Station Location名 (複数指定可)
   --location-template T   --location未指定局の名称テンプレート
-                          ({station} は STATION_CALLSIGN, {safe} は "/"を"-"に置換)
-                          (default: "{station}")
+                          ({station}=STATION_CALLSIGN, {safe}="/"を"-"に置換,
+                          {area}=末尾"/n"の数字)
+                          (default: "POTA-{area}AREA"。"/n"が無い局は "{station}")
   --password-env VAR      証明書パスワードを読む環境変数名(コマンドラインに直接は渡さない)
   --action ACTION         TQSLの重複/期間外QSOの扱い all|compliant|abort
                           (default: compliant)
@@ -82,6 +83,10 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   0 正常 / 1 入力・整形エラー / 2 TQSL実行エラー(アップロード失敗含む)
 
 変更履歴:
+  1.2.0  Station Locationの既定名を STATION_CALLSIGN の "/n" から
+         "POTA-nAREA"(例: JQ1UCG/0 -> POTA-0AREA)で決めるようにした
+         (--location-templateの既定を "POTA-{area}AREA" に変更。"/n" の無い
+         局は {station} にフォールバック。{area} プレースホルダを追加)。
   1.1.0  --dv-modeの既定を keep から dstar に変更(D-STARをMODE=DSTARで送る)。
          同一公園REFが複数行ある場合、STATION_CALLSIGNの"/n"とPOTA-REF.csvの
          JARLエリア番号で候補行を自動的に絞り込むようにした(例: JQ1UCG/0 の
@@ -102,7 +107,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 EOR_RE = re.compile(rb"<eor>", re.IGNORECASE)
 EOH_RE = re.compile(rb"<eoh>", re.IGNORECASE)
@@ -394,7 +399,7 @@ def main():
     mode.add_argument("--upload", action="store_true")
     ap.add_argument("--tqsl", metavar="PATH")
     ap.add_argument("--location", action="append", metavar="SPEC")
-    ap.add_argument("--location-template", default="{station}")
+    ap.add_argument("--location-template", default="POTA-{area}AREA")
     ap.add_argument("--password-env", metavar="VAR")
     ap.add_argument("--action", choices=["all", "compliant", "abort"], default="compliant")
     ap.add_argument("--tqsl-extra", metavar="ARGS")
@@ -477,8 +482,14 @@ def main():
         adif_path = out_dir / f"{today}-{safe}_lotw.adif"
         adif_path.write_text(build_header(station) + "".join(format_record(f) for f in recs),
                              encoding="utf-8")
-        location = locs.get(station.upper()) or \
-            args.location_template.format(station=station, safe=safe)
+        m_area = re.search(r"/(\d)$", station)
+        if station.upper() in locs:
+            location = locs[station.upper()]
+        elif m_area or "{area}" not in args.location_template:
+            location = args.location_template.format(
+                station=station, safe=safe, area=m_area.group(1) if m_area else "")
+        else:
+            location = station  # "/n" が無い局はSTATION_CALLSIGNそのまま
         jobs.append((station, adif_path, location, len(recs)))
 
     st = ctx["stats"]
