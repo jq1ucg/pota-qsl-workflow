@@ -17,8 +17,8 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
        -> 2個目以降の "." を除去して "7.0055" に修正。直せない値/BANDと
           矛盾する値は FREQ を削除(TQSL は BAND から処理できる)
   3. D-STAR が MODE=DIGITALVOICE + SUBMODE=DSTAR
-       -> 既定で MODE=DSTAR(単独モード)に変換。--dv-mode で変更可
-          (理由は --dv-mode の項を参照)
+       -> 既定ではそのまま(MODE=DIGITALVOICE, SUBMODE=DSTAR)。
+          --dv-mode で MODE=DSTAR / FM への変換も可
   4. レコードが QSO 日時の降順など不揃い
        -> QSO_DATE → TIME_ON 順にソート
   5. STATION_CALLSIGN は JQ1UCG/0 のような運用地サフィックス付き
@@ -52,15 +52,14 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   --jarl-field NAME       JCC/JCG/AJA用タグ名 (default: jccjcgaja)
   -c, --choice SPEC       複数県にまたがる公園REFの選択行 (例: JP-0209:1)
   --overwrite             既存の MY_STATE/MY_CNTY/JCC等も上書き
-  --dv-mode MODE          DIGITALVOICE+DSTARの扱い (dstar|keep|fm, default: dstar)
-                            dstar: MODE=DSTAR(単独モード)に変換, SUBMODEは削除
-                                   (TQSLの設定データが旧世代(config 9.x)でも
-                                   新世代でも受理される形式のため既定とした)
+  --dv-mode MODE          DIGITALVOICE+DSTARの扱い (keep|dstar|fm, default: keep)
                             keep : MODE=DIGITALVOICE, SUBMODE=DSTAR のまま
-                                   (ADIF 3.1系の正式形式。TQSLが受理しない場合あり)
+                                   (ADIF 3.1系の正式形式)
+                            dstar: MODE=DSTAR(単独モード)に変換, SUBMODEは削除
                             fm   : MODE=FM に変換, SUBMODEは削除
-                          ※D-STARが受理されない場合は、TQSLの設定データ更新、または
-                            TQSL「環境設定 > ADIFモード」でDSTARをDATA等へ割当てる
+                          ※TQSLが受理しない場合は、TQSLの設定データ更新、または
+                            TQSL「環境設定 > ADIFモード」での割当て、もしくは
+                            --dv-mode dstar を試す
   --dedupe                STATION+CALL+日時(分)+BAND+MODE+SUBMODE が同一なら重複除去
   --start-date YYYYMMDD   この日付以降のQSOのみ対象 (TQSL -b にも渡す)
   --end-date YYYYMMDD     この日付以前のQSOのみ対象 (TQSL -e にも渡す)
@@ -83,6 +82,8 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   0 正常 / 1 入力・整形エラー / 2 TQSL実行エラー(アップロード失敗含む)
 
 変更履歴:
+  1.3.0  --dv-modeの既定を dstar から keep に戻した(MODE=DIGITALVOICE +
+         SUBMODE=DSTARのまま送る。dstar/fmは明示指定で利用可)。
   1.2.0  Station Locationの既定名を STATION_CALLSIGN の "/n" から
          "POTA-nAREA"(例: JQ1UCG/0 -> POTA-0AREA)で決めるようにした
          (--location-templateの既定を "POTA-{area}AREA" に変更。"/n" の無い
@@ -107,7 +108,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 EOR_RE = re.compile(rb"<eor>", re.IGNORECASE)
 EOH_RE = re.compile(rb"<eoh>", re.IGNORECASE)
@@ -390,7 +391,7 @@ def main():
     ap.add_argument("--jarl-field", default="jccjcgaja")
     ap.add_argument("-c", "--choice", metavar="SPEC")
     ap.add_argument("--overwrite", action="store_true")
-    ap.add_argument("--dv-mode", choices=["dstar", "keep", "fm"], default="dstar")
+    ap.add_argument("--dv-mode", choices=["keep", "dstar", "fm"], default="keep")
     ap.add_argument("--dedupe", action="store_true")
     ap.add_argument("--start-date", metavar="YYYYMMDD")
     ap.add_argument("--end-date", metavar="YYYYMMDD")
