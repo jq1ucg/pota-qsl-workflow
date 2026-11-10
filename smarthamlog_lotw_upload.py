@@ -74,6 +74,11 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   --password-env VAR      証明書パスワードを読む環境変数名(コマンドラインに直接は渡さない)
   --action ACTION         TQSLの重複/期間外QSOの扱い all|compliant|abort
                           (default: compliant)
+  --cnty-format FMT       MY_CNTYの出力形式 (state|plain, default: state)
+                            state: "09,0908"(県番号,JCC。従来形式)
+                            plain: "0908"(接頭辞なし)
+                          ※TQSLが『'US County State' の値として '09' ... 正しくありません』
+                            と言う場合は plain を試す
   --location-mismatch M   ADIFの局所在地(MY_STATE/MY_CNTY等)とStation Locationが
                           食い違う場合のTQSLの扱い。TQSLの -f に渡す
                           (update|report|ignore|none, default: update)
@@ -90,6 +95,11 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   3 TQSLが署名対象QSOを0件と判断(全QSOが重複または期間外。TQSL終了コード8)
 
 変更履歴:
+  1.6.0  --cnty-format を追加(state|plain, default: state)。plain指定で MY_CNTY を
+         "0908" の形(県番号の接頭辞なし)で出力する。TQSLが "09,0908" のカンマ前を
+         米国の州として解釈し『'US County State' の値として '09' ... 正しくありません』
+         で停止する場合に使う。TQSLが署名対象0件/エラーを返した場合、TQSLの
+         出力(エラー本文)の末尾をコンソールにも表示する。
   1.5.0  TQSL終了コード8(全QSOが重複/期間外=署名対象0件)を [ok] ではなく
          [warn] として表示し、終了コード3を返すようにした。--sign-only で
          .tq8 が作られなかった場合も検出する。対処のヒント(--action all、
@@ -125,7 +135,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 EOR_RE = re.compile(rb"<eor>", re.IGNORECASE)
 EOH_RE = re.compile(rb"<eoh>", re.IGNORECASE)
@@ -325,7 +335,8 @@ def normalize_record(fields, args, ctx, label):
                 state = digits[:2]
                 if set_field(fields, "MY_STATE", state, args.overwrite):
                     st["state_added"] += 1
-                if set_field(fields, "MY_CNTY", f"{state},{digits}", args.overwrite):
+                cnty = digits if args.cnty_format == "plain" else f"{state},{digits}"
+                if set_field(fields, "MY_CNTY", cnty, args.overwrite):
                     st["cnty_added"] += 1
                 set_field(fields, args.jarl_field.upper(), entry["jarl"], args.overwrite)
     elif ctx["ref_table"] is not None:
@@ -422,6 +433,7 @@ def main():
     ap.add_argument("--location-template", default="POTA-{area}AREA")
     ap.add_argument("--password-env", metavar="VAR")
     ap.add_argument("--action", choices=["all", "compliant", "abort"], default="compliant")
+    ap.add_argument("--cnty-format", default="state", choices=["state", "plain"])
     ap.add_argument("--location-mismatch", default="update",
                     choices=["update", "report", "ignore", "none"])
     ap.add_argument("--tqsl-extra", metavar="ARGS")
@@ -551,6 +563,12 @@ def main():
         log = out_dir / f"{adif_path.stem}.tqsl.log"
         log.write_text(f"cmd: {mask_cmd(cmd)}\nexit: {rc}\n--- stdout ---\n{out}\n"
                        f"--- stderr ---\n{err}\n", encoding="utf-8")
+        if rc not in (None, 0, 9):
+            tail = [l for l in (out + "\n" + err).splitlines()
+                    if l.strip() and "QThreadStorage" not in l][-25:]
+            if tail:
+                print(f"--- TQSL出力(末尾) {station} ---\n" + "\n".join(tail) +
+                      "\n---", file=sys.stderr)
         if rc is None:
             print(f"[error] {station}: {err}", file=sys.stderr)
             failed = True
