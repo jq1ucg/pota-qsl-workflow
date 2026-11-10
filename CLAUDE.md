@@ -62,12 +62,57 @@ Update this file as structure, dependencies, and conventions solidify.
     `pivot_qso_for_glabels.py -c` by label count / QSO count.
 11. **`find_non_ja_calls.py`** — Utility to find generated filenames whose
     callsign doesn't match a JA amateur radio prefix pattern.
-12. **`smarthamlog_lotw_upload.py`** — Takes **Smart HAMLOG** ADIF exports
-    (park ref in `MY_SIG_INFO`, malformed `FREQ` like `7.005.5`, D-STAR as
-    `DIGITALVOICE`+`DSTAR`), normalizes them for LoTW (reuses
-    `polo-lotw-fill.py` for `MY_STATE`/`MY_CNTY`/JCC), splits by
-    `STATION_CALLSIGN`, and signs/uploads via the **TQSL CLI**. Dry-run by
-    default; `--sign-only` makes `.tq8`, `--upload` uploads.
+12. **`smarthamlog_lotw_upload.py`** (v1.7.0) — Takes **Smart HAMLOG** ADIF
+    exports, normalizes them for LoTW (reuses `polo-lotw-fill.py` functions),
+    splits by `STATION_CALLSIGN`, and signs/uploads via the **TQSL CLI**.
+    Dry-run by default; `--sign-only` makes `.tq8`, `--upload` uploads.
+    See "LoTW / TQSL knowledge" below before changing it.
+
+## LoTW / TQSL knowledge (learned in practice, TQSL 2.8.6)
+
+Verified on the user's machine (`~/pota-parks/bin/` script, `~/pota-parks/data/POTA-REF.csv`):
+- Working command (all 329 QSOs of 2026-11-07..09 uploaded, exit 0):
+  `python3 smarthamlog_lotw_upload.py -p POTA-REF.csv *.adi -o output --upload`
+  (add `--action all` if TQSL reports "以前に署名されたQSO").
+- Station Locations in TQSL are `POTA-0AREA`, `POTA-1AREA`, `POTA-2AREA`
+  (chosen from the `/n` suffix of `STATION_CALLSIGN`); base `JQ1UCG` is separate.
+- TQSL `config.xml` (`/usr/local/share/TrustedQSL/config.xml`): `JA_PREFECTURE` is a
+  2-digit code (09=Nagano, 10=Tokyo, 16=Gunma); `JA_CITY_GUN_KU` values are
+  **plain codes under each prefecture** (`0908`, `09015`, `100120`, `1611`).
+  => ADIF must be `MY_STATE=09` and `MY_CNTY=0908` (NO `09,` prefix).
+  `MY_CNTY=09,0908` (US-style "ST,county", still emitted by `polo-lotw-fill.py`)
+  makes TQSL stop with "'US County State' の値として '09' ... 正しくありません".
+  That script was NOT changed; use `--cnty-format plain` (default) in the
+  smarthamlog script, and re-check `polo-lotw-fill.py` before trusting it.
+- The station location's fixed JCC differs per park, so TQSL must be run with
+  `-f update` (ADIF MY_STATE/MY_CNTY override the location); otherwise it stops with
+  "局の所在地は QSO データの詳細と一致していない". Default in the script.
+- TQSL processes newest QSO first, so the error "line N" is always the last record;
+  it is not specific to that record.
+- `--sign-only` marks QSOs as signed in TQSL's duplicate DB; a later `--upload`
+  then exits 8 ("No QSOs to upload"). Use `--upload` directly, or `--action all`.
+  (Alternative: upload the saved `.tq8` via the LoTW web page / TQSL GUI.)
+- TQSL exit codes: 0 ok, 8 nothing to sign (all dup/out of range, or error), 9 partial.
+- `MODE=DIGITALVOICE` + `SUBMODE=DSTAR` is accepted by TQSL 2.8.6 (kept by default;
+  `--dv-mode dstar|fm` exist as fallbacks). How LoTW classifies D-STAR (PHONE/DATA)
+  is NOT verified.
+- The script reads TQSL's `config.xml` to pre-check (MY_STATE, MY_CNTY) pairs.
+
+Smart HAMLOG ADIF quirks: park ref is in `MY_SIG_INFO` (not `MY_POTA_REF`);
+`FREQ` can be malformed (`7.005.5` -> fixed to `7.0055`); times are UTC;
+other station's park is in `SIG_INFO`; no `MY_STATE`/`MY_CNTY`.
+
+`POTA-REF.csv` (tracked in this repo; the user's live copy is elsewhere):
+the area column is the JARL area of the *operation* (`/0`, `/1`); the same park
+can have one row per area (e.g. JP-0012: area 0 = JP-NN JCC0908, area 1 = JP-GM
+JCC1611) and the script picks the row by the `/n` suffix. User-supplied JCC/JCG
+values override auto-geocoded ones; a trailing letter in JCG codes (e.g. `09015C`)
+is NOT kept in `POTA-REF.csv`.
+
+Environment notes: the cloud sandbox cannot reach `lotw.arrl.org` (host not
+allowed), so TQSL/LoTW behavior cannot be checked there; ask the user to run
+commands on their own machine and paste logs. `pycache` from importing
+`polo-lotw-fill.py` should not be committed.
 
 ## Repository
 - GitHub: https://github.com/jq1ucg/pota-qsl-workflow
