@@ -17,7 +17,8 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
        -> 2個目以降の "." を除去して "7.0055" に修正。直せない値/BANDと
           矛盾する値は FREQ を削除(TQSL は BAND から処理できる)
   3. D-STAR が MODE=DIGITALVOICE + SUBMODE=DSTAR
-       -> --dv-mode で変換方法を選択(default: keep = そのまま)
+       -> 既定で MODE=DSTAR(単独モード)に変換。--dv-mode で変更可
+          (理由は --dv-mode の項を参照)
   4. レコードが QSO 日時の降順など不揃い
        -> QSO_DATE → TIME_ON 順にソート
   5. STATION_CALLSIGN は JQ1UCG/0 のような運用地サフィックス付き
@@ -51,10 +52,15 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   --jarl-field NAME       JCC/JCG/AJA用タグ名 (default: jccjcgaja)
   -c, --choice SPEC       複数県にまたがる公園REFの選択行 (例: JP-0209:1)
   --overwrite             既存の MY_STATE/MY_CNTY/JCC等も上書き
-  --dv-mode MODE          DIGITALVOICE+DSTARの扱い (keep|dstar|fm, default: keep)
+  --dv-mode MODE          DIGITALVOICE+DSTARの扱い (dstar|keep|fm, default: dstar)
+                            dstar: MODE=DSTAR(単独モード)に変換, SUBMODEは削除
+                                   (TQSLの設定データが旧世代(config 9.x)でも
+                                   新世代でも受理される形式のため既定とした)
                             keep : MODE=DIGITALVOICE, SUBMODE=DSTAR のまま
-                            dstar: MODE=DSTAR(ADIF旧仕様の値)に変換, SUBMODEは削除
+                                   (ADIF 3.1系の正式形式。TQSLが受理しない場合あり)
                             fm   : MODE=FM に変換, SUBMODEは削除
+                          ※D-STARが受理されない場合は、TQSLの設定データ更新、または
+                            TQSL「環境設定 > ADIFモード」でDSTARをDATA等へ割当てる
   --dedupe                STATION+CALL+日時(分)+BAND+MODE+SUBMODE が同一なら重複除去
   --start-date YYYYMMDD   この日付以降のQSOのみ対象 (TQSL -b にも渡す)
   --end-date YYYYMMDD     この日付以前のQSOのみ対象 (TQSL -e にも渡す)
@@ -76,6 +82,11 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   0 正常 / 1 入力・整形エラー / 2 TQSL実行エラー(アップロード失敗含む)
 
 変更履歴:
+  1.1.0  --dv-modeの既定を keep から dstar に変更(D-STARをMODE=DSTARで送る)。
+         同一公園REFが複数行ある場合、STATION_CALLSIGNの"/n"とPOTA-REF.csvの
+         JARLエリア番号で候補行を自動的に絞り込むようにした(例: JQ1UCG/0 の
+         JP-0012 は長野側、JQ1UCG/1 の JP-0012 は群馬側)。-c指定がある公園は
+         従来どおり絞り込まず-cの行番号を優先。
   1.0.0  初版。Smart HAMLOG ADIF の整形(MY_POTA_REF補完, FREQ修正,
          DSTAR変換, MY_STATE/MY_CNTY/JCC付与)とTQSL CLI経由の署名/アップロード
 """
@@ -91,7 +102,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 EOR_RE = re.compile(rb"<eor>", re.IGNORECASE)
 EOH_RE = re.compile(rb"<eoh>", re.IGNORECASE)
@@ -274,6 +285,12 @@ def normalize_record(fields, args, ctx, label):
             w.append(f"[warn] {label}: 公園REF {park} がPOTA-REF.csvに見つかりません")
         else:
             mod = ctx["fill"]
+            # 同一公園が複数行ある場合、/n サフィックスとJARLエリア番号で絞り込む
+            m_area = re.search(r"/(\d)$", get(fields, "STATION_CALLSIGN").strip())
+            if len(cands) > 1 and m_area and park not in ctx["choices"]:
+                narrowed = [c for c in cands if c["area"] == m_area.group(1)]
+                if narrowed:
+                    cands = narrowed
             entry = mod.select_ref_entry(park, cands, get(fields, "COMMENT"),
                                          ctx["choices"], label, w)
             digits = mod.digits_only(entry["jarl"])
@@ -368,7 +385,7 @@ def main():
     ap.add_argument("--jarl-field", default="jccjcgaja")
     ap.add_argument("-c", "--choice", metavar="SPEC")
     ap.add_argument("--overwrite", action="store_true")
-    ap.add_argument("--dv-mode", choices=["keep", "dstar", "fm"], default="keep")
+    ap.add_argument("--dv-mode", choices=["dstar", "keep", "fm"], default="dstar")
     ap.add_argument("--dedupe", action="store_true")
     ap.add_argument("--start-date", metavar="YYYYMMDD")
     ap.add_argument("--end-date", metavar="YYYYMMDD")
