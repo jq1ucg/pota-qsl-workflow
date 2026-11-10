@@ -74,6 +74,13 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   --password-env VAR      証明書パスワードを読む環境変数名(コマンドラインに直接は渡さない)
   --action ACTION         TQSLの重複/期間外QSOの扱い all|compliant|abort
                           (default: compliant)
+  --location-mismatch M   ADIFの局所在地(MY_STATE/MY_CNTY等)とStation Locationが
+                          食い違う場合のTQSLの扱い。TQSLの -f に渡す
+                          (update|report|ignore|none, default: update)
+                            update: ADIFの値でStation Locationの値を上書きして署名
+                            report: 食い違いを報告(エラー扱い)
+                            ignore: ADIFの局所在地情報を無視しStation Locationの値を使用
+                            none  : -f を渡さない(古いTQSLで -f が使えない場合)
   --tqsl-extra "ARGS"     TQSLへ追加で渡す引数(shlex分割)
   --timeout SEC           TQSL 1回あたりのタイムアウト秒 (default: 300)
   --version               バージョン番号を表示して終了
@@ -82,6 +89,11 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   0 正常 / 1 入力・整形エラー / 2 TQSL実行エラー(アップロード失敗含む)
 
 変更履歴:
+  1.4.0  --location-mismatch を追加(default: update)。TQSLの -f オプションとして
+         渡し、ADIFのMY_STATE/MY_CNTY(公園ごとのJCC等)でStation Locationの値を
+         上書きして署名する。これが無いとTQSLが「局の所在地は QSOデータの詳細と
+         一致していない('JA City/Gun/Ku' の値は '0906' ですが、QSO データの値は
+         '0908' です)」で停止する。
   1.3.0  --dv-modeの既定を dstar から keep に戻した(MODE=DIGITALVOICE +
          SUBMODE=DSTARのまま送る。dstar/fmは明示指定で利用可)。
   1.2.0  Station Locationの既定名を STATION_CALLSIGN の "/n" から
@@ -108,7 +120,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 EOR_RE = re.compile(rb"<eor>", re.IGNORECASE)
 EOH_RE = re.compile(rb"<eoh>", re.IGNORECASE)
@@ -346,6 +358,8 @@ def parse_locations(specs):
 
 def build_tqsl_cmd(tqsl, adif_path, location, args, tq8_path=None):
     cmd = [tqsl, "-d", "-x", "-q", "-a", args.action, "-l", location]
+    if args.location_mismatch != "none":
+        cmd += ["-f", args.location_mismatch]
     if args.start_date:
         cmd += ["-b", args.start_date]
     if args.end_date:
@@ -403,6 +417,8 @@ def main():
     ap.add_argument("--location-template", default="POTA-{area}AREA")
     ap.add_argument("--password-env", metavar="VAR")
     ap.add_argument("--action", choices=["all", "compliant", "abort"], default="compliant")
+    ap.add_argument("--location-mismatch", default="update",
+                    choices=["update", "report", "ignore", "none"])
     ap.add_argument("--tqsl-extra", metavar="ARGS")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--version", action="version",
