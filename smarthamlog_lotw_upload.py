@@ -87,8 +87,13 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
 
 終了コード:
   0 正常 / 1 入力・整形エラー / 2 TQSL実行エラー(アップロード失敗含む)
+  3 TQSLが署名対象QSOを0件と判断(全QSOが重複または期間外。TQSL終了コード8)
 
 変更履歴:
+  1.5.0  TQSL終了コード8(全QSOが重複/期間外=署名対象0件)を [ok] ではなく
+         [warn] として表示し、終了コード3を返すようにした。--sign-only で
+         .tq8 が作られなかった場合も検出する。対処のヒント(--action all、
+         証明書のQSO有効期間確認)を表示する。
   1.4.0  --location-mismatch を追加(default: update)。TQSLの -f オプションとして
          渡し、ADIFのMY_STATE/MY_CNTY(公園ごとのJCC等)でStation Locationの値を
          上書きして署名する。これが無いとTQSLが「局の所在地は QSOデータの詳細と
@@ -120,7 +125,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 EOR_RE = re.compile(rb"<eor>", re.IGNORECASE)
 EOH_RE = re.compile(rb"<eoh>", re.IGNORECASE)
@@ -532,6 +537,7 @@ def main():
             sys.exit(f"[error] 環境変数 {args.password_env} が設定されていません")
 
     failed = False
+    nothing = False
     for station, adif_path, location, n in jobs:
         tq8 = adif_path.with_suffix(".tq8") if args.sign_only else None
         cmd = build_tqsl_cmd(tqsl or "tqsl", adif_path, location, args, tq8)
@@ -548,7 +554,22 @@ def main():
         if rc is None:
             print(f"[error] {station}: {err}", file=sys.stderr)
             failed = True
+        elif rc == 8:
+            nothing = True
+            print(f"[warn] {station}: exit=8 署名対象QSOが0件でした"
+                  f"{'(.tq8は作成されていません)' if args.sign_only else '(何もアップロードされていません)'}"
+                  f"  (ログ: {log})\n"
+                  "       全QSOが『TQSLの署名済み記録との重複』か『証明書のQSO有効期間外』です。\n"
+                  "       - 過去に同じQSOを署名/アップロード済みなら --action all で再署名できます\n"
+                  "         (LoTW側で重複は無視されます)\n"
+                  "       - それでも0件なら、TQSLで当該局の証明書のQSO開始/終了日を確認してください",
+                  file=sys.stderr)
         elif rc in TQSL_OK_CODES:
+            if args.sign_only and not tq8.exists():
+                failed = True
+                print(f"[error] {station}: exit={rc} ですが {tq8} が作成されていません  (ログ: {log})",
+                      file=sys.stderr)
+                continue
             print(f"[ok] {station}: exit={rc} {TQSL_EXIT[rc]}  (ログ: {log})", file=sys.stderr)
         else:
             print(f"[error] {station}: exit={rc} {TQSL_EXIT.get(rc, '不明')}  (ログ: {log})",
@@ -559,7 +580,7 @@ def main():
 
     if not do_tqsl:
         print("[info] 実際に送るには --upload を付けて再実行してください", file=sys.stderr)
-    sys.exit(2 if failed else 0)
+    sys.exit(2 if failed else (3 if nothing else 0))
 
 
 if __name__ == "__main__":
