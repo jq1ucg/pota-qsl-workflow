@@ -74,11 +74,14 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   --password-env VAR      証明書パスワードを読む環境変数名(コマンドラインに直接は渡さない)
   --action ACTION         TQSLの重複/期間外QSOの扱い all|compliant|abort
                           (default: compliant)
-  --cnty-format FMT       MY_CNTYの出力形式 (state|plain, default: state)
-                            state: "09,0908"(県番号,JCC。従来形式)
-                            plain: "0908"(接頭辞なし)
-                          ※TQSLが『'US County State' の値として '09' ... 正しくありません』
-                            と言う場合は plain を試す
+  --cnty-format FMT       MY_CNTYの出力形式 (plain|state, default: plain)
+                            plain: "0908"(接頭辞なし。TQSLのJA_CITY_GUN_KUの値と同形式)
+                            state: "09,0908"(県番号,JCC。従来形式。TQSL 2.8.6では
+                                   『'US County State' の値として '09' ... 正しくありません』
+                                   で停止する)
+  --tqsl-config PATH      TQSLのconfig.xml。指定(または自動探索で発見)すると、
+                          MY_STATE/MY_CNTYの組がTQSLの選択肢に存在するか事前チェックし、
+                          存在しない組は警告する。'none' で無効化
   --location-mismatch M   ADIFの局所在地(MY_STATE/MY_CNTY等)とStation Locationが
                           食い違う場合のTQSLの扱い。TQSLの -f に渡す
                           (update|report|ignore|none, default: update)
@@ -95,6 +98,11 @@ Smart HAMLOG 出力 ADIF の特徴と、本スクリプトの対処:
   3 TQSLが署名対象QSOを0件と判断(全QSOが重複または期間外。TQSL終了コード8)
 
 変更履歴:
+  1.7.0  --cnty-formatの既定を plain に変更(MY_STATE=09, MY_CNTY=0908)。
+         TQSL 2.8.6 の config.xml で JA_PREFECTURE は2桁の県番号、
+         JA_CITY_GUN_KU は県番号ごと(dependency)の接頭辞なしコードと確認したため。
+         --tqsl-config を追加し、署名前にMY_STATE/MY_CNTYの組がconfig.xmlに
+         存在するか事前チェックして警告する(未指定時は既定の場所を自動探索)。
   1.6.0  --cnty-format を追加(state|plain, default: state)。plain指定で MY_CNTY を
          "0908" の形(県番号の接頭辞なし)で出力する。TQSLが "09,0908" のカンマ前を
          米国の州として解釈し『'US County State' の値として '09' ... 正しくありません』
@@ -135,7 +143,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 EOR_RE = re.compile(rb"<eor>", re.IGNORECASE)
 EOH_RE = re.compile(rb"<eoh>", re.IGNORECASE)
@@ -362,6 +370,68 @@ def find_tqsl(path_arg):
     return None
 
 
+CONFIG_CANDIDATES = (
+    "/usr/local/share/TrustedQSL/config.xml",
+    "/usr/share/TrustedQSL/config.xml",
+    "~/.tqsl/config.xml",
+    r"C:\Program Files (x86)\TrustedQSL\config.xml",
+    r"C:\Program Files\TrustedQSL\config.xml",
+    "/Applications/TrustedQSL/tqsl.app/Contents/Resources/config.xml",
+)
+
+
+def find_tqsl_config(path_arg):
+    if path_arg:
+        return None if path_arg.lower() == "none" else path_arg
+    for c in CONFIG_CANDIDATES:
+        c = os.path.expanduser(c)
+        if os.path.exists(c):
+            return c
+    return None
+
+
+def load_ja_choices(path):
+    """config.xml から ({県番号}, {(県番号, 市郡区コード)}) を返す"""
+    import xml.etree.ElementTree as ET
+    root = ET.parse(path).getroot()
+    prefs, cities = set(), set()
+    for fld in root.iter("field"):
+        fid = fld.get("Id")
+        if fid == "JA_PREFECTURE":
+            prefs = {e.get("value") for e in fld.iter("enum")}
+        elif fid == "JA_CITY_GUN_KU":
+            for enums in fld.iter("enums"):
+                dep = enums.get("dependency")
+                for e in enums.iter("enum"):
+                    cities.add((dep, e.get("value")))
+    return prefs, cities
+
+
+def check_ja_locations(by_station, config_path):
+    """MY_STATE/MY_CNTYの組がTQSLの選択肢に存在するか検査して警告を表示。
+    戻り値: 不正な組の数"""
+    prefs, cities = load_ja_choices(config_path)
+    if not prefs or not cities:
+        print(f"[warn] {config_path} から JA_PREFECTURE/JA_CITY_GUN_KU を読めないため"
+              f"事前チェックを省略します", file=sys.stderr)
+        return 0
+    bad = {}
+    for station, recs in by_station.items():
+        for f in recs:
+            st, cn = get(f, "MY_STATE"), get(f, "MY_CNTY")
+            if not st and not cn:
+                continue
+            cn = cn.split(",")[-1]
+            if st not in prefs:
+                bad.setdefault((st, cn, "県"), set()).add(get(f, "MY_POTA_REF"))
+            elif (st, cn) not in cities:
+                bad.setdefault((st, cn, "市郡区"), set()).add(get(f, "MY_POTA_REF"))
+    for (st, cn, kind), parks in sorted(bad.items()):
+        print(f"[warn] TQSLの選択肢に無い{kind}: MY_STATE={st} MY_CNTY={cn} "
+              f"(公園: {','.join(sorted(parks))})", file=sys.stderr)
+    return len(bad)
+
+
 def parse_locations(specs):
     locs = {}
     for s in specs or []:
@@ -433,7 +503,8 @@ def main():
     ap.add_argument("--location-template", default="POTA-{area}AREA")
     ap.add_argument("--password-env", metavar="VAR")
     ap.add_argument("--action", choices=["all", "compliant", "abort"], default="compliant")
-    ap.add_argument("--cnty-format", default="state", choices=["state", "plain"])
+    ap.add_argument("--cnty-format", default="plain", choices=["plain", "state"])
+    ap.add_argument("--tqsl-config", metavar="PATH")
     ap.add_argument("--location-mismatch", default="update",
                     choices=["update", "report", "ignore", "none"])
     ap.add_argument("--tqsl-extra", metavar="ARGS")
@@ -502,6 +573,14 @@ def main():
         print(w, file=sys.stderr)
     if not by_station:
         sys.exit("[error] 出力対象のレコードがありません")
+
+    cfg = find_tqsl_config(args.tqsl_config)
+    if cfg and os.path.exists(cfg):
+        n_bad = check_ja_locations(by_station, cfg)
+        print(f"[info] TQSL config.xml で局所在地を事前チェック: {cfg} "
+              f"({'問題なし' if not n_bad else f'要確認 {n_bad} 組'})", file=sys.stderr)
+    elif args.tqsl_config and args.tqsl_config.lower() != "none":
+        print(f"[warn] --tqsl-config が見つかりません: {args.tqsl_config}", file=sys.stderr)
 
     # --- ファイル出力
     out_dir = Path(args.output_dir)
